@@ -1,10 +1,14 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 from typing import List, Optional
+from pydantic import TypeAdapter
 
 # Note: Fields are marked Optional as API responses might vary.
-# Consider adding aliases if the API uses different naming conventions (e.g., camelCase).
+# Configure models to handle camelCase input from the API.
 
 class IncomeStatementEntry(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     date: str
     symbol: str
     revenue: Optional[float] = None
@@ -29,6 +33,8 @@ class IncomeStatementEntry(BaseModel):
 
 
 class BalanceSheetEntry(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     date: str
     symbol: str
     cash_and_cash_equivalents: Optional[float] = None
@@ -58,7 +64,7 @@ class BalanceSheetEntry(BaseModel):
     common_stock: Optional[float] = None
     retained_earnings: Optional[float] = None
     accumulated_other_comprehensive_income_loss: Optional[float] = None
-    othertotal_stockholders_equity: Optional[float] = None
+    othertotal_stockholders_equity: Optional[float] = Field(None, alias='otherTotalStockholdersEquity')
     total_stockholders_equity: Optional[float] = None
     total_equity: Optional[float] = None
     total_liabilities_and_stockholders_equity: Optional[float] = None
@@ -78,6 +84,8 @@ class BalanceSheetEntry(BaseModel):
 
 
 class CashFlowEntry(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     date: str
     symbol: str
     net_income: Optional[float] = None
@@ -123,4 +131,9 @@ class CashFlowEntry(BaseModel):
 class FinancialsResponse(BaseModel):
     income_statements: List[IncomeStatementEntry]
     balance_sheets: List[BalanceSheetEntry]
-    cash_flows: List[CashFlowEntry] 
+    cash_flows: List[CashFlowEntry]
+
+# Define TypeAdapters for lists of models for efficient serialization/deserialization
+IncomeStatementListAdapter = TypeAdapter(List[IncomeStatementEntry])
+BalanceSheetListAdapter = TypeAdapter(List[BalanceSheetEntry])
+CashFlowListAdapter = TypeAdapter(List[CashFlowEntry]) 
