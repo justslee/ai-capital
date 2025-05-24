@@ -22,6 +22,10 @@ class IncomeStatementEntry(BaseModel):
     income_before_tax: Optional[float] = None
     income_tax_expense: Optional[float] = None
     net_income: Optional[float] = None
+    eps: Optional[float] = None
+    epsdiluted: Optional[float] = None
+    weighted_average_shs_out: Optional[float] = None
+    weighted_average_shs_out_dil: Optional[float] = None # This maps to weightedAverageShsOutDil
     reported_currency: Optional[str] = None
     cik: Optional[str] = None
     filling_date: Optional[str] = None
