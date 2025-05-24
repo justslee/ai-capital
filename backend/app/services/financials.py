@@ -48,15 +48,17 @@ async def get_stock_financials(
                 "revenue": entry.revenue,
                 "cost_of_revenue": entry.cost_of_revenue,
                 "gross_profit": entry.gross_profit,
-                "rd_expenses": entry.research_and_development_expenses, # Map names
-                "sga_expenses": entry.selling_general_and_administrative_expenses, # Map names
+                "rd_expenses": entry.research_and_development_expenses,
+                "sga_expenses": entry.selling_general_and_administrative_expenses,
                 "operating_expenses": entry.operating_expenses,
-                "operating_income": entry.operating_income_loss, # Map names
+                "operating_income": entry.operating_income_loss,
                 "interest_expense": entry.interest_expense,
-                "ebt": entry.income_before_tax, # Map names
-                "income_tax": entry.income_tax_expense, # Map names
+                "ebt": entry.income_before_tax,
+                "income_tax": entry.income_tax_expense,
                 "net_income": entry.net_income,
-                # Add eps/shares_outstanding if available and needed in DB
+                # Map diluted shares from schema field to DB column
+                "shares_outstanding": entry.weighted_average_shs_out_dil, # Use diluted
+                "eps": entry.epsdiluted # Map diluted EPS as well if needed
             }
             income_stmt_data.append(stmt_dict)
 
