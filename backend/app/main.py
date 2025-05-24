@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 # Using absolute import starting from backend
-from backend.app.api.endpoints import financials
+from backend.app.api.endpoints import financials, valuation
 
 app = FastAPI(
     title="AI Capital API",
@@ -10,7 +10,8 @@ app = FastAPI(
 )
 
 # Include routers
-app.include_router(financials.router, prefix="/api/v1")
+app.include_router(financials.router, prefix="/api/v1/financials", tags=["financials"])
+app.include_router(valuation.router, prefix="/api/v1/valuation", tags=["valuation"])
 
 @app.get("/")
 async def read_root():
