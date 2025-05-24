@@ -1,1 +1,0 @@
-# API Endpoints for AI Capital 
