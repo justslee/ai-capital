@@ -1,5 +1,5 @@
 import openai
-from app.core.config import OPENAI_API_KEY, TOP_LEVEL_SUMMARY_MODEL, MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY
+from app.domains.summarization.core.config import OPENAI_API_KEY, TOP_LEVEL_SUMMARY_MODEL, MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY
 import sys
 import traceback
 

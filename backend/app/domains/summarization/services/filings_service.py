@@ -5,8 +5,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.filings import SECFilingDB
-from backend.app.schemas.filings import SECFiling # Pydantic model for type hinting if needed
+from app.models.filings import SECFilingDB
+from app.schemas.filings import SECFiling # Pydantic model for type hinting if needed
 
 logger = logging.getLogger(__name__)
 

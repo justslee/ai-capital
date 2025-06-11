@@ -1,6 +1,6 @@
 import requests
 from typing import List, Optional, Dict
-from backend.app.sec_utils import ticker_to_cik
+from app.sec_utils import ticker_to_cik
 
 BASE_EDGAR_URL = "https://data.sec.gov"
 # Updated User-Agent to be more specific and include a placeholder for contact info

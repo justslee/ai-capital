@@ -1,21 +1,32 @@
 from fastapi import FastAPI
 
-# Using absolute import starting from backend
-from backend.app.api.endpoints import financials, valuation
+# Import domain-based routers with relative imports
+from app.domains.summarization.api.summary_endpoint import router as summarization_router
+from app.domains.valuation.api.valuation_endpoints import router as valuation_router
+from app.domains.modeling.api.modeling_endpoints import router as modeling_router
 
 app = FastAPI(
     title="AI Capital API",
-    description="API for fetching and analyzing financial data.",
+    description="API for fetching and analyzing financial data with summarization, valuation, and modeling capabilities.",
     version="0.1.0"
 )
 
-# Include routers
-app.include_router(financials.router, prefix="/api/v1/financials", tags=["financials"])
-app.include_router(valuation.router, prefix="/api/v1/valuation", tags=["valuation"])
+# Include domain routers
+app.include_router(summarization_router, prefix="/api/v1", tags=["summarization"])
+app.include_router(valuation_router, prefix="/api/v1", tags=["valuation"])
+app.include_router(modeling_router, prefix="/api/v1", tags=["modeling"])
 
 @app.get("/")
 async def read_root():
-    return {"message": "Welcome to AI Capital API"}
+    return {
+        "message": "Welcome to AI Capital API",
+        "domains": {
+            "summarization": "Financial statement and SEC filing summarization",
+            "valuation": "Company valuation calculations (DCF, financial data)",
+            "modeling": "Price prediction and modeling functionality"
+        },
+        "version": "0.1.0"
+    }
 
 # You can include your API routers here later
 # Example: from .api.endpoints import items

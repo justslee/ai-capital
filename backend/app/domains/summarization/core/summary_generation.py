@@ -1,14 +1,14 @@
 import psycopg2
 import sys
 import traceback
-from app.core.config import (
+from app.domains.summarization.core.config import (
     TOP_LEVEL_SUMMARY_MODEL,
     MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY,
     SOURCE_SECTION_KEYS_FOR_TOP_LEVEL,
     SECTION_SUMMARY_MODEL # Used to identify which source summaries to fetch
 )
 from app.db.database_utils import db_cursor
-from app.core.llm_services import call_openai_api
+from app.domains.summarization.core.llm_services import call_openai_api
 
 # This is the detailed prompt for hedge fund managers, as defined previously.
 HEDGE_FUND_SYSTEM_PROMPT = "You are an expert financial analyst AI. Your task is to synthesize information from provided SEC 10-K section summaries into a comprehensive analysis tailored for hedge fund managers to aid in their investment decisions."

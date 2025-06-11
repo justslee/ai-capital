@@ -1,15 +1,16 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 from typing import AsyncGenerator
 
-# Using absolute import from backend.app
-from backend.app.config import settings # Point to config.py
+# Using relative import from backend.app
+from app.config import settings # Point to config.py
 
-# Create the async engine
-engine = create_async_engine(settings.database_url, pool_pre_ping=True, echo=False)
+# Create an async engine
+async_engine = create_async_engine(settings.database_url, echo=False)
 
-# Create a session factory using async_sessionmaker (preferred)
-AsyncSessionFactory = async_sessionmaker(
-    bind=engine,
+# Create a session factory
+AsyncSessionFactory = sessionmaker(
+    bind=async_engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )

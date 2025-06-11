@@ -1,11 +1,12 @@
 import asyncio
 import logging
 from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.db.session import SessionLocalAsync # Corrected import path
-from backend.app.services.sec_client import SECClient
-from backend.app.services.filings_service import store_filing
-from backend.app.sec_utils import get_company_info_by_ticker
+from app.db.session import AsyncSessionFactory
+from app.domains.summarization.services.sec_client import SECClient
+from app.domains.summarization.services.filings_service import store_filing
+from app.sec_utils import get_company_info_by_ticker
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,7 +17,7 @@ TICKERS_TO_INGEST = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]
 FILING_TYPES_TO_INGEST = ["10-K", "10-Q", "8-K"]
 RECENT_FILINGS_COUNT = 10 # How many recent filings to check for each type
 
-async def ingest_filings_for_ticker(db: SessionLocalAsync, client: SECClient, ticker: str):
+async def ingest_filings_for_ticker(db: AsyncSession, client: SECClient, ticker: str):
     logger.info(f"Starting ingestion for ticker: {ticker}")
 
     company_info = get_company_info_by_ticker(ticker)
@@ -86,7 +87,7 @@ async def main_ingestion_loop():
     logger.info("Starting main SEC filings ingestion loop...")
     sec_client = SECClient()
     
-    async with SessionLocalAsync() as db_session:
+    async with AsyncSessionFactory() as db_session:
         for ticker_symbol in TICKERS_TO_INGEST:
             try:
                 await ingest_filings_for_ticker(db_session, sec_client, ticker_symbol)

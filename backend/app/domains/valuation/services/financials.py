@@ -4,9 +4,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert # For upsert
 from datetime import date as date_obj
 
 # Ensure absolute imports from backend.app
-from backend.app.services.fmp_client import FMPClient
-from backend.app.schemas.financials import FinancialsResponse, IncomeStatementEntry, BalanceSheetEntry, CashFlowEntry
-from backend.app.models.financials import IncomeStatementDB, BalanceSheetDB, CashFlowDB
+from app.domains.valuation.services.fmp_client import FMPClient
+from app.schemas.financials import FinancialsResponse, IncomeStatementEntry, BalanceSheetEntry, CashFlowEntry
+from app.models.financials import IncomeStatementDB, BalanceSheetDB, CashFlowDB
 
 async def get_stock_financials(
     db: AsyncSession, # Added db session parameter
