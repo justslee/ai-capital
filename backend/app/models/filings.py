@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.sql import func
-from backend.app.db.base_class import Base
+from app.db.base_class import Base
 
 class SECFilingDB(Base):
     __tablename__ = "sec_filings"
