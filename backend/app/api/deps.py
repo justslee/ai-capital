@@ -1,7 +1,6 @@
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
-# Ensure absolute import from backend.app
-from backend.app.db.session import AsyncSessionFactory
+from app.db.session import AsyncSessionFactory
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency to get an async database session."""

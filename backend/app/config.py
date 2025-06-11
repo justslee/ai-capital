@@ -8,8 +8,8 @@ class Settings(BaseSettings):
     # redis_password: Optional[str] = None # Add if your Redis requires authentication
     cache_ttl_seconds: int = 3600 # Default cache TTL: 1 hour
     database_url: str = "postgresql+asyncpg://postgres:D2i2OufzIJmZWGLxchzJ@database-1.cj6qsswemdys.us-east-2.rds.amazonaws.com:5432/company_data" 
-    pinecone_api_key: str
-    pinecone_environment: str
+    pinecone_api_key: Optional[str] = None
+    pinecone_environment: Optional[str] = None
     openai_api_key: str
     # Add other Pinecone/OpenAI settings if needed, e.g., Pinecone index name, OpenAI model
 
