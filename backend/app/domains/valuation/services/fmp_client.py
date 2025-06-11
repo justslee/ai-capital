@@ -4,10 +4,12 @@ import json
 from typing import Optional, List, Dict, Any
 from pydantic import parse_obj_as, ValidationError, TypeAdapter, BaseModel
 from functools import partial
+import redis.asyncio as redis
+from datetime import timedelta
 
 # Ensure absolute imports from backend.app and point to config.py
-from backend.app.config import settings # Corrected path
-from backend.app.schemas.financials import (
+from app.config import settings # Corrected path
+from app.schemas.financials import (
     IncomeStatementEntry,
     BalanceSheetEntry,
     CashFlowEntry,
@@ -16,7 +18,7 @@ from backend.app.schemas.financials import (
     BalanceSheetListAdapter,
     CashFlowListAdapter
 )
-from backend.app.core.cache import get_redis_client # This seems correct
+from app.domains.summarization.core.cache import get_redis_client # This seems correct
 
 FMP_API_BASE_URL = "https://financialmodelingprep.com/api"
 

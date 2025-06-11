@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Path
-from app.core.summary_generation import generate_and_store_top_level_summary
+from app.domains.summarization.core.summary_generation import generate_and_store_top_level_summary
 from app.db.database_utils import db_cursor # For direct DB queries if needed by the endpoint logic
 import psycopg2
 import sys

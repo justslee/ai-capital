@@ -7,9 +7,9 @@ from datetime import date as date_type
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.financials import CashFlowDB, IncomeStatementDB
-from backend.app.schemas.valuation import ValuationResponse
-from backend.app.services.financials import get_stock_financials # Import the existing service
+from app.models.financials import CashFlowDB, IncomeStatementDB
+from app.schemas.valuation import ValuationResponse
+from app.domains.valuation.services.financials import get_stock_financials
 
 logger = logging.getLogger(__name__)
 
