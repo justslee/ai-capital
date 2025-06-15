@@ -1,4 +1,24 @@
 fastapi
 uvicorn[standard]
 pydantic
-pydantic-settings 
+pydantic-settings
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+aiohttp
+pandas
+numpy
+openai
+pinecone-client
+tiktoken
+python-multipart
+python-dotenv
+
+# DuckDB + Parquet Storage Dependencies
+duckdb>=0.9.0
+pyarrow>=14.0.0
+click>=8.0.0
+
+# Additional data processing
+polars>=0.20.0  # Optional: Even faster DataFrame operations
+fastparquet>=2023.10.0  # Alternative Parquet engine 
