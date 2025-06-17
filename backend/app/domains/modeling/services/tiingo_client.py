@@ -102,26 +102,27 @@ class TiingoClient:
         """
         try:
             # Format dates
-            if start_date is None:
-                start_date = self.config.default_start_date
-            if isinstance(start_date, date):
-                start_date = start_date.isoformat()
-            
             if end_date is None:
                 end_date = date.today().isoformat()
             elif isinstance(end_date, date):
                 end_date = end_date.isoformat()
             
-            # Build URL
+            # Build URL and params
             url = f"{self.base_url}/daily/{ticker}/prices"
             params = {
-                "startDate": start_date,
                 "endDate": end_date,
                 "format": "json",
                 "resampleFreq": frequency
             }
             
-            logger.info(f"Fetching historical data for {ticker} from {start_date} to {end_date}")
+            # Only add startDate if specified - omitting it gets ALL available data
+            if start_date is not None:
+                if isinstance(start_date, date):
+                    start_date = start_date.isoformat()
+                params["startDate"] = start_date
+                logger.info(f"Fetching historical data for {ticker} from {start_date} to {end_date}")
+            else:
+                logger.info(f"Fetching ALL available historical data for {ticker} up to {end_date}")
             
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
