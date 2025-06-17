@@ -217,6 +217,10 @@ async def query_ticker_prices(
                 "message": "No data found for the specified criteria"
             }
         
+        # Clean data for JSON serialization (handle NaN/inf values)
+        result_df = result_df.replace([float('inf'), float('-inf')], None)
+        result_df = result_df.fillna(None)
+        
         # Convert to records for JSON response
         records = result_df.to_dict('records')
         
@@ -278,6 +282,10 @@ async def get_ml_features(
                 "record_count": 0,
                 "message": "No features generated for the specified criteria"
             }
+        
+        # Clean data for JSON serialization (handle NaN/inf values)
+        result_df = result_df.replace([float('inf'), float('-inf')], None)
+        result_df = result_df.fillna(None)
         
         # Convert to records
         records = result_df.to_dict('records')

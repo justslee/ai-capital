@@ -22,3 +22,6 @@ click>=8.0.0
 # Additional data processing
 polars>=0.20.0  # Optional: Even faster DataFrame operations
 fastparquet>=2023.10.0  # Alternative Parquet engine 
+# S3 Storage Dependencies
+boto3>=1.26.0
+botocore>=1.29.0
