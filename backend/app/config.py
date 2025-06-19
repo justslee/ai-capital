@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
-    fmp_api_key: str
+    fmp_api_key: Optional[str] = None
     redis_host: str = "localhost" 
     redis_port: int = 6379     
     # redis_password: Optional[str] = None # Add if your Redis requires authentication
