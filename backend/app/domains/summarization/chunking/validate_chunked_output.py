@@ -61,27 +61,7 @@ try:
     cur = conn.cursor()
     print(f"Connected to database '{conn_params['dbname']}'.")
 
-    # DEBUG: Check if tables are visible IN THIS SCRIPT
-    print("\n--- Checking for tables in current schema (from validate_chunked_output.py) ---")
-    cur.execute("""
-        SELECT schemaname, tablename 
-        FROM pg_catalog.pg_tables 
-        WHERE schemaname NOT LIKE 'pg_%' AND schemaname <> 'information_schema'
-        ORDER BY schemaname, tablename;
-    """)
-    tables_in_schema = cur.fetchall()
-    # Get current schema name for printing
-    cur.execute("SELECT current_schema();")
-    current_schema_name = cur.fetchone()[0]
 
-    if tables_in_schema:
-        print(f"Tables found by validate_chunked_output.py in schema '{current_schema_name}':")
-        for schema, table_name in tables_in_schema:
-            print(f"  - Schema: {schema}, Table: {table_name}")
-    else:
-        print(f"No tables found by validate_chunked_output.py in schema '{current_schema_name}'.")
-    print("--- End of table check (from validate_chunked_output.py) ---")
-    # End DEBUG block
 
     target_accession_number = ACCESSION_NUMBER_TO_VALIDATE
 

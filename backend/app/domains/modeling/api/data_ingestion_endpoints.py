@@ -4,20 +4,26 @@ Data Ingestion API Endpoints
 API endpoints for managing data ingestion operations in the modeling domain.
 """
 
+# Standard library imports
 import logging
-from typing import Optional, List, Dict, Any
 from datetime import date, datetime
+from typing import Optional, List, Dict, Any
+
+# Third-party imports
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from app.db.session import get_db
+# App imports
+from app.api.deps import get_db
+
+# Domain imports (relative)
 from ..data_ingestion.price_data_ingestion import price_data_ingestion_service
 from ..config.modeling_config import get_sp100_symbols, get_all_target_symbols, get_index_symbols
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/modeling", tags=["modeling", "data-ingestion"])
+router = APIRouter(tags=["modeling", "data-ingestion"])
 
 
 # Request/Response Models

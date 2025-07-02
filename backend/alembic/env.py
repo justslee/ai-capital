@@ -43,7 +43,7 @@ from app.models.financials import * # Reverted path
 from app.models.company import * # Keep company model
 from app.config import settings # Reverted path
 
-print(f"Settings object loaded. DATABASE_URL = {settings.database_url}") # Debug print
+
 
 target_metadata = Base.metadata
 # ----------------------------------
@@ -68,7 +68,7 @@ def run_migrations_offline() -> None:
 
     """
     # Use the DATABASE_URL from settings (should be loaded from .env now)
-    print(f"Offline migration using URL: {settings.database_url}") # Add log
+    
     url = settings.database_url 
     context.configure(
         url=url,
@@ -94,7 +94,7 @@ async def run_async_migrations() -> None:
     """
     # Use the DATABASE_URL from settings (should be loaded from .env now)
     db_url = settings.database_url # Re-read from the potentially re-imported settings
-    print(f"Async migration using URL: {db_url}") 
+     
     connectable = async_engine_from_config(
         {"sqlalchemy.url": db_url},
         prefix="sqlalchemy.",
