@@ -1,27 +1,67 @@
-# AI Capital
+# AI Capital 🚀
 
-A high-performance financial data platform with zero local storage footprint, perfect for work devices.
+**Empowering retail investors with hedge fund-level analytical tools, personalized and accessible.**
 
-## 🌩️ Key Features
+AI Capital democratizes sophisticated financial analysis by providing institutional-grade SEC filing analysis, DCF valuations, and AI-powered price predictions through simple APIs.
 
-- **Zero Local Storage**: All data stored in AWS S3
-- **63+ Years of Data**: Historical data back to 1962 for many tickers
-- **Lightning Fast**: 10-100x faster than PostgreSQL with DuckDB + S3
-- **495,643+ Records**: Comprehensive historical data for 39+ tickers
-- **Ultra Efficient**: 43MB storage for half a million records
-- **Work-Device Friendly**: Perfect for corporate environments
+## 🎯 Mission
+
+Transform how individual investors analyze markets by providing:
+- **Professional SEC filing analysis** - Extract key insights from 10-K/10-Q filings instantly
+- **Institutional-grade valuations** - DCF models used by top investment firms  
+- **AI-powered predictions** - Machine learning forecasts trained on decades of market data
+- **Personalized insights** - Tailored analysis based on your investment profile
+
+## 🌐 Public API
+
+Three core endpoints power intelligent investment decisions:
+
+### 📋 SEC Filing Analysis
+```http
+GET /api/v1/summary/{ticker}/{year}/{form_type}
+```
+**Example**: `GET /api/v1/summary/AAPL/2023/10-K`
+
+Get AI-powered summaries of SEC filings with key business insights, risk factors, and management analysis.
+
+### 💰 Company Valuation  
+```http
+GET /api/v1/valuation/dcf/{ticker}
+```
+**Example**: `GET /api/v1/valuation/dcf/AAPL`
+
+Institutional-grade DCF (Discounted Cash Flow) valuations with intrinsic value calculations.
+
+### 🔮 Price Prediction
+```http
+POST /api/v1/predict/{ticker}
+```
+**Example**: `POST /api/v1/predict/AAPL?days_ahead=30&model_type=lstm`
+
+AI-powered stock price forecasting with confidence intervals *(coming Q2 2024)*.
+
+## 🏗️ Architecture
+
+The platform uses domain-driven architecture with clear separation between public client APIs and internal operational systems:
+
+- **🌐 Public API** (`/api/v1`) - Three core endpoints for retail investors
+- **🔒 Internal API** (`/internal`) - Administrative and data management operations  
+- **📊 Domain Services** - Modular business logic (Summarization, Valuation, Modeling)
+- **☁️ Cloud Infrastructure** - AWS S3 storage with DuckDB analytics engine
 
 ## 🚀 Quick Start
 
-### 1. Setup S3 Storage (First Time Only)
-```bash
-cd backend/scripts/setup
-python setup_s3_storage.py
-```
-
-### 2. Install Dependencies
+### 1. Install Dependencies
 ```bash
 pip install -r backend/requirements.txt
+```
+
+### 2. Configure Environment
+```bash
+# Set required API keys in .env file
+OPENAI_API_KEY=your_openai_key
+FMP_API_KEY=your_fmp_key
+TIINGO_API_KEY=your_tiingo_key
 ```
 
 ### 3. Start the Server
@@ -30,120 +70,40 @@ cd backend
 uvicorn app.main:app --reload --port 8001
 ```
 
-### 4. Ingest Financial Data
+### 4. Test the API
 ```bash
-# From project root - convenient runner
-python run_s3_ingestion.py
+# Get Apple's latest 10-K summary
+curl http://localhost:8001/api/v1/summary/AAPL/2023/10-K
 
-# Or run directly
-cd backend/scripts/ingestion
-python s3_bulk_ingest.py
+# Get DCF valuation for Apple
+curl http://localhost:8001/api/v1/valuation/dcf/AAPL
 ```
 
-## 📊 What You Get
+## 📈 Example Response
 
-- **495,643 total records** across 39 tickers
-- **Date range**: 1962-01-02 to present
-- **Major companies**: AAPL (1980+), MSFT (1986+), IBM (1962+), KO (1962+)
-- **Storage cost**: ~$1/month on AWS S3
-- **Query performance**: Sub-second analytics
-
-## 🏗️ Architecture
-
-```
-AI Capital
-├── backend/
-│   ├── app/                    # FastAPI application
-│   │   ├── domains/           # Domain-driven design
-│   │   │   ├── modeling/      # Financial data modeling
-│   │   │   ├── summarization/ # AI summarization
-│   │   │   └── valuation/     # Company valuation
-│   │   └── main.py           # FastAPI entry point
-│   └── scripts/              # Utility scripts
-│       ├── ingestion/        # Data ingestion scripts
-│       ├── setup/           # Setup and configuration
-│       └── testing/         # Testing utilities
-└── run_s3_ingestion.py      # Convenience script
-```
-
-## 📡 API Endpoints
-
-### S3 DuckDB Storage (Recommended)
-- `GET /api/v1/s3-duckdb/health` - Health check
-- `POST /api/v1/s3-duckdb/ingest/ticker/{ticker}` - Ingest single ticker
-- `GET /api/v1/s3-duckdb/data/{ticker}` - Get historical data
-- `GET /api/v1/s3-duckdb/data/{ticker}/latest` - Get latest price
-- `GET /api/v1/s3-duckdb/storage/stats` - Storage statistics
-- `GET /api/v1/s3-duckdb/analysis/tickers` - Available tickers
-
-### Traditional Storage
-- `GET /api/v1/duckdb-storage/*` - Local DuckDB endpoints
-- `GET /api/v1/summarization/*` - AI summarization
-- `GET /api/v1/valuation/*` - Company valuation
-
-## 💾 Storage Systems
-
-| System | Performance | Storage | Cost | Work Device |
-|--------|-------------|---------|------|-------------|
-| **S3 + DuckDB** | 🚀 10-100x faster | ☁️ Zero local | 💰 ~$1/month | ✅ Perfect |
-| Local DuckDB | 🚀 Very fast | 💽 Local files | 💰 Free | ⚠️ Storage required |
-| PostgreSQL | 🐌 Standard | 💽 Local/Remote | 💰 Varies | ⚠️ Setup required |
-
-## 🧪 Testing
-
-```bash
-# Test S3 connectivity
-cd backend/scripts/testing
-python test_tiingo_simple.py
-
-# Test DuckDB system
-python test_duckdb_system.py
-```
-
-## 📈 Example Usage
-
-```python
-import requests
-
-# Get latest Apple price
-response = requests.get("http://localhost:8001/api/v1/s3-duckdb/data/AAPL/latest")
-latest_price = response.json()
-
-# Get historical data
-response = requests.get("http://localhost:8001/api/v1/s3-duckdb/data/AAPL?limit=100")
-historical_data = response.json()
-
-# Get storage statistics
-response = requests.get("http://localhost:8001/api/v1/s3-duckdb/storage/stats")
-stats = response.json()
+```json
+{
+  "status": "success",
+  "message": "DCF valuation calculated successfully",
+  "data": {
+    "intrinsic_value_per_share": 185.42,
+    "total_intrinsic_value": 2891849280000,
+    "shares_outstanding": 15599800000,
+    "valuation_methodology": "Discounted Cash Flow (DCF)"
+  },
+  "ticker": "AAPL"
+}
 ```
 
 ## 🛠️ Requirements
 
-- Python 3.8+
-- AWS Account (for S3 storage)
-- Tiingo API Key (free tier: 500 requests/hour)
-
-## 🌟 Benefits
-
-### For Work Devices
-- **Zero local storage footprint**
-- **No corporate firewall issues**
-- **Easy to move between machines**
-- **Compliant with IT policies**
-
-### For Performance
-- **Sub-second queries** on 500K+ records
-- **Columnar storage** optimized for analytics
-- **Automatic compression** (80-85% reduction)
-- **Serverless scaling** with S3
-
-### For Cost
-- **$1/month** for complete dataset
-- **Free Tiingo tier** (500 req/hour)
-- **No infrastructure costs**
-- **Pay-as-you-go** S3 pricing
+- **Python 3.8+**
+- **API Keys** (free tiers available):
+  - OpenAI API (for SEC analysis)
+  - Financial Modeling Prep (for financial data)
+  - Tiingo API (for price data)
 
 ---
 
-**Perfect for quantitative analysis, backtesting, and financial modeling on work devices! 🚀** 
+**AI Capital: Democratizing institutional-grade financial analysis for everyone.** 📈
+</code_block_to_apply_changes_from>
