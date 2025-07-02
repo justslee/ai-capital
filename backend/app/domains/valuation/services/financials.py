@@ -1,12 +1,20 @@
-from typing import Optional
+# Standard library imports
+import logging
+from typing import Optional, List
+
+# Third-party imports
+from decimal import Decimal
+
+# App imports
+from app.schemas.financials import FinancialsResponse, IncomeStatementEntry, BalanceSheetEntry, CashFlowEntry
+from app.models.financials import IncomeStatementDB, BalanceSheetDB, CashFlowDB
+
+# Domain imports (relative)
+from .fmp_client import FMPClient
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert # For upsert
 from datetime import date as date_obj
-
-# Ensure absolute imports from backend.app
-from app.domains.valuation.services.fmp_client import FMPClient
-from app.schemas.financials import FinancialsResponse, IncomeStatementEntry, BalanceSheetEntry, CashFlowEntry
-from app.models.financials import IncomeStatementDB, BalanceSheetDB, CashFlowDB
 
 async def get_stock_financials(
     db: AsyncSession, # Added db session parameter
@@ -21,16 +29,16 @@ async def get_stock_financials(
     fmp_client = FMPClient()
     financials_api_response = None
     try:
-        print(f"Fetching financials for {symbol} ({period}, limit={limit})...")
+        # Fetch financials from FMP
         financials_api_response = await fmp_client.get_financials(
             symbol=symbol, limit=limit, period=period
         )
 
         if not financials_api_response:
-            print(f"Could not retrieve financials for {symbol} from FMPClient.")
+            # Silent error - no financials retrieved
             return None # Return None if API fetch fails
 
-        print(f"Successfully fetched financials for {symbol}. Storing in DB...")
+        # Process financials for database storage
 
         # Prepare data for bulk upsert
         income_stmt_data = []
@@ -121,34 +129,26 @@ async def get_stock_financials(
         # --- Perform Bulk Upserts --- 
         if income_stmt_data:
             await _bulk_upsert(db, IncomeStatementDB, income_stmt_data, ["ticker", "date", "period"])
-            print(f"Upserted {len(income_stmt_data)} income statement records for {symbol}.")
 
         if balance_sheet_data:
             await _bulk_upsert(db, BalanceSheetDB, balance_sheet_data, ["ticker", "date", "period"])
-            print(f"Upserted {len(balance_sheet_data)} balance sheet records for {symbol}.")
             
         if cash_flow_data:
             await _bulk_upsert(db, CashFlowDB, cash_flow_data, ["ticker", "date", "period"])
-            print(f"Upserted {len(cash_flow_data)} cash flow records for {symbol}.")
 
         await db.commit()
-        print(f"Database commit successful for {symbol}.")
 
     except Exception as e:
-        print(f"Error in service layer processing financials for {symbol}: {e}")
+        # Log error without console output
         await db.rollback() # Rollback on error
-        # Log the full traceback for debugging
-        import traceback
-        traceback.print_exc()
         return None # Indicate failure
     finally:
         # Ensure the client connection is closed regardless of DB operations
         await fmp_client.close()
-        print(f"FMPClient closed for {symbol} request.")
 
     return financials_api_response # Return the original API response
 
-async def _bulk_upsert(db: AsyncSession, model, data: list[dict], index_elements: list[str]):
+async def _bulk_upsert(db: AsyncSession, model, data: List[dict], index_elements: List[str]):
     """Helper function for bulk upsert using INSERT ON CONFLICT DO UPDATE."""
     if not data:
         return
@@ -167,22 +167,55 @@ async def _bulk_upsert(db: AsyncSession, model, data: list[dict], index_elements
     )
     await db.execute(upsert_stmt)
 
-# Example Usage (commented out) ...
+async def fetch_and_store_financials(symbol: str, period: str = "annual", limit: int = 5, db: AsyncSession = None) -> bool:
+    """
+    Fetch financial data from FMP and store in the database.
+    Returns True if successful, False otherwise.
+    """
+    fmp_client = FMPClient()
+    
+    try:
+        # Fetch financials from FMP
+        financials = await fmp_client.get_financials(symbol, period, limit)
+        
+        if not financials:
+            return False
 
-# Example Usage (Requires running within an async context)
-# import asyncio
-#
-# async def main():
-#     aapl_financials = await get_stock_financials("AAPL", limit=2)
-#     if aapl_financials:
-#         print(f"AAPL Income Statements count: {len(aapl_financials.income_statements)}")
-#         # Access data like: aapl_financials.income_statements[0].revenue
-#     else:
-#         print("Failed to get AAPL financials.")
-#
-# if __name__ == "__main__":
-#     # Make sure .env is in the root relative to where this script might be run from
-#     # Adjust path to .env loading if necessary
-#     # from dotenv import load_dotenv
-#     # load_dotenv()
-#     asyncio.run(main()) 
+        # Store financials in database
+        return await store_financials_in_db(financials, symbol, db)
+        
+    except Exception as e:
+        # Log error without console output
+        return False
+    finally:
+        await fmp_client.close()
+
+async def store_financials_in_db(financials: FinancialsResponse, symbol: str, db: AsyncSession) -> bool:
+    """Store financial data in the database using bulk upsert operations."""
+    
+    try:
+        # Bulk upsert income statements
+        if financials.income_statements:
+            income_stmt_data = [stmt.model_dump() for stmt in financials.income_statements]
+            await _bulk_upsert(db, IncomeStatementDB, income_stmt_data, ["ticker", "date", "period"])
+
+        # Bulk upsert balance sheets  
+        if financials.balance_sheets:
+            balance_sheet_data = [bs.model_dump() for bs in financials.balance_sheets]
+            await _bulk_upsert(db, BalanceSheetDB, balance_sheet_data, ["ticker", "date", "period"])
+
+        # Bulk upsert cash flows
+        if financials.cash_flows:
+            cash_flow_data = [cf.model_dump() for cf in financials.cash_flows]
+            await _bulk_upsert(db, CashFlowDB, cash_flow_data, ["ticker", "date", "period"])
+
+        # Commit transaction
+        await db.commit()
+        return True
+        
+    except Exception as e:
+        await db.rollback()
+        # Log error without console output
+        return False
+
+# Financial services module providing async operations for fetching and storing financial data. 

@@ -17,7 +17,7 @@ from ..config.modeling_config import get_modeling_config
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/modeling/duckdb", tags=["DuckDB Data Management"])
+router = APIRouter(prefix="/duckdb", tags=["DuckDB Data Management"])
 
 
 @router.post("/ingest/single/{ticker}")

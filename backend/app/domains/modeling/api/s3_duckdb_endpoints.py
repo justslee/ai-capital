@@ -17,7 +17,7 @@ from ..storage.s3_duckdb_service import get_s3_storage_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/s3-duckdb", tags=["S3 DuckDB"])
+router = APIRouter(prefix="/s3-duckdb", tags=["modeling", "s3-duckdb"])
 
 
 # Request/Response Models

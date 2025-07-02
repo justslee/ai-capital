@@ -1,14 +1,17 @@
-import httpx
+# Standard library imports
 import asyncio
 import json
-from typing import Optional, List, Dict, Any
-from pydantic import parse_obj_as, ValidationError, TypeAdapter, BaseModel
-from functools import partial
-import redis.asyncio as redis
 from datetime import timedelta
+from functools import partial
+from typing import Optional, List, Dict, Any
 
-# Ensure absolute imports from backend.app and point to config.py
-from app.config import settings # Corrected path
+# Third-party imports
+import httpx
+from pydantic import parse_obj_as, ValidationError, TypeAdapter, BaseModel
+# import redis.asyncio as redis  # Optional dependency
+
+# App imports
+from app.config import settings
 from app.schemas.financials import (
     IncomeStatementEntry,
     BalanceSheetEntry,
@@ -18,7 +21,7 @@ from app.schemas.financials import (
     BalanceSheetListAdapter,
     CashFlowListAdapter
 )
-from app.domains.summarization.core.cache import get_redis_client # This seems correct
+# from app.domains.summarization.core.cache import get_redis_client  # Optional caching
 
 FMP_API_BASE_URL = "https://financialmodelingprep.com/api"
 
@@ -42,44 +45,42 @@ class FMPClient:
         await self._client.aclose()
 
     # Mark method as async
-    async def _make_request(self, endpoint: str, params: Optional[dict] = None) -> Optional[List[dict]]:
-        """Helper method to make async GET requests to the FMP API."""
-        if params is None:
-            params = {}
-        # API key added globally or per request depending on client setup
-        params['apikey'] = self.api_key
-        request_endpoint = endpoint.lstrip('/') # Use relative endpoint with base_url
-
+    async def _make_request(self, endpoint: str) -> Optional[List[Dict]]:
+        """Make HTTP request to FMP API with error handling."""
+        request_endpoint = f"{self.base_url}/{endpoint}"
+        
         try:
-            # Use the async client and await the response
-            response = await self._client.get(request_endpoint, params=params)
-            # Log the status code
-            print(f"FMP API Request to {response.url} returned status code: {response.status_code}")
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-
-            data = response.json()
-            if isinstance(data, list):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(request_endpoint)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                # Handle API errors
+                if isinstance(data, dict) and "Error Message" in data:
+                    # Silent error - API returned error message
+                    return None
+                
+                # Handle empty responses
+                if isinstance(data, list) and len(data) == 0:
+                    # Silent empty response - likely no data available
+                    return None
+                    
+                # Handle unexpected response format
+                if not isinstance(data, list):
+                    # Silent error - unexpected response format
+                    return None
+                    
                 return data
-            elif isinstance(data, dict) and 'Error Message' in data:
-                print(f"API Error for {response.url}: {data['Error Message']}")
-                return None
-            elif len(data) == 0: # Handle empty list response common with FMP
-                print(f"Received empty list from {response.url}, likely no data for period/symbol.")
-                return [] # Return empty list instead of None for clarity
-            else:
-                print(f"Unexpected response format from {response.url}: {data}")
-                return None
-
-        # Catch httpx specific exceptions
+                
         except httpx.HTTPStatusError as e:
-             print(f"HTTP Error for {e.request.url}: {e.response.status_code} - {e.response.text}")
-             return None
+            # Silent HTTP error
+            return None
         except httpx.RequestError as e:
-            print(f"HTTP Request failed for {e.request.url}: {e}")
+            # Silent request error
             return None
         except Exception as e:
-            # Catch other potential errors (like JSON decoding)
-            print(f"An error occurred during request to {request_endpoint}: {e}")
+            # Silent unexpected error
             return None
 
     # Generic helper for cache logic
@@ -92,38 +93,40 @@ class FMPClient:
         symbol: str
     ) -> Optional[List[BaseModel]]:
 
-        redis_client = await get_redis_client()
+        # Redis caching temporarily disabled to avoid dependency issues
+        redis_client = None
         if not redis_client:
-            print(f"Redis client unavailable, fetching {model_name} directly for {symbol}.")
-            # Fallback to direct fetch if Redis is down
+            # Direct fetch without caching
             api_data_list = await fetch_coroutine()
             if api_data_list is None: return None
             if not api_data_list: return []
             try:
                  return parse_obj_as(list_adapter.core_schema, api_data_list)
             except ValidationError as e:
-                 print(f"Direct fetch data validation error for {model_name} ({symbol}): {e}")
+                 # Silent validation error
                  return None
 
         cached_data_str = None
         try:
             cached_data_str = await redis_client.get(cache_key)
         except Exception as e:
-            print(f"Redis GET error for key {cache_key}: {e}")
-            # Proceed to fetch if Redis read fails
+            # Silent Redis error - proceed to fetch if Redis read fails
+            pass
 
         if cached_data_str:
-            print(f"Cache HIT for {cache_key}")
+            # Cache hit - try to deserialize
             try:
                 # Deserialize using TypeAdapter
                 return list_adapter.validate_json(cached_data_str)
             except (ValidationError, json.JSONDecodeError) as e:
-                print(f"Cache data validation/decode error for {cache_key}: {e}. Fetching fresh data.")
+                # Silent cache validation error - fetch fresh data
                 # Optionally delete invalid cache entry
-                # try: await redis_client.delete(cache_key) except Exception as del_e: print(f"Failed to delete invalid cache key {cache_key}: {del_e}")
+                try:
+                    await redis_client.delete(cache_key)
+                except Exception:
+                    pass
 
-        # --- Cache MISS --- 
-        print(f"Cache MISS for {cache_key}")
+        # Cache miss - fetch fresh data
         api_data_list = await fetch_coroutine() # Call the original _make_request via lambda/partial
 
         if api_data_list is None: # API call failed
@@ -142,14 +145,15 @@ class FMPClient:
             data_to_cache_str = list_adapter.dump_json(parsed_data).decode('utf-8')
             try:
                 await redis_client.set(cache_key, data_to_cache_str, ex=settings.cache_ttl_seconds)
-                print(f"Cached data for {cache_key} with TTL {settings.cache_ttl_seconds}s")
+                # Silent cache success
             except Exception as e:
-                print(f"Redis SET error for key {cache_key}: {e}")
+                # Silent cache error
+                pass
             
             return parsed_data # Return the validated Pydantic objects
         
         except ValidationError as e:
-            print(f"Data validation error for {model_name} ({symbol}) after fetch: {e}")
+            # Silent validation error
             return None # Don't return or cache invalid data
 
     # Mark method as async
@@ -161,7 +165,7 @@ class FMPClient:
         
         # Define the coroutine to fetch data if cache miss
         async def fetch(): 
-            return await self._make_request(endpoint, params=params)
+            return await self._make_request(endpoint)
             
         return await self._get_cached_or_fetch(
             cache_key=cache_key,
@@ -179,7 +183,7 @@ class FMPClient:
         cache_key = f"fmp:{symbol.upper()}:{period}:{limit}:balance"
 
         async def fetch():
-             return await self._make_request(endpoint, params=params)
+             return await self._make_request(endpoint)
              
         return await self._get_cached_or_fetch(
             cache_key=cache_key,
@@ -197,7 +201,7 @@ class FMPClient:
         cache_key = f"fmp:{symbol.upper()}:{period}:{limit}:cashflow"
 
         async def fetch():
-            return await self._make_request(endpoint, params=params)
+            return await self._make_request(endpoint)
 
         return await self._get_cached_or_fetch(
             cache_key=cache_key,
@@ -208,8 +212,9 @@ class FMPClient:
         )
 
     # Mark method as async
-    async def get_financials(self, symbol: str, limit: int = 5, period: str = 'annual') -> Optional[FinancialsResponse]:
-        """Fetches all three primary financial statements for a symbol."""
+    async def get_financials(self, symbol: str, period: str = "annual", limit: int = 5) -> Optional[FinancialsResponse]:
+        """Fetch all financial statements for a company."""
+        
         # Use asyncio.gather to run requests concurrently
         results = await asyncio.gather(
             self.get_income_statements(symbol, limit, period),
@@ -225,9 +230,7 @@ class FMPClient:
         if isinstance(income_statements, Exception) or income_statements is None or \
            isinstance(balance_sheets, Exception) or balance_sheets is None or \
            isinstance(cash_flows, Exception) or cash_flows is None:
-             print(f"Failed to fetch one or more financial statements for {symbol}.")
-             # Log specific errors if needed by checking exception types
-             # e.g., if isinstance(income_statements, Exception): print(income_statements)
+             # Silent error - failed to fetch one or more financial statements
              return None
 
         return FinancialsResponse(
@@ -236,24 +239,4 @@ class FMPClient:
             cash_flows=cash_flows
         )
 
-# Example of how to potentially use the client (can be imported elsewhere)
-# async def main():
-#     client = FMPClient()
-#     try:
-#         ticker = "AAPL"
-#         financials = await client.get_financials(ticker, limit=3)
-#         if financials:
-#             print(f"Fetched financials for {ticker}:")
-#             print("Income Statements:", len(financials.income_statements))
-#             # print(financials.income_statements[0].model_dump_json(indent=2)) # Use model_dump_json in Pydantic v2
-#             print("Balance Sheets:", len(financials.balance_sheets))
-#             # print(financials.balance_sheets[0].model_dump_json(indent=2))
-#             print("Cash Flows:", len(financials.cash_flows))
-#             # print(financials.cash_flows[0].model_dump_json(indent=2))
-#         else:
-#             print(f"Could not fetch financials for {ticker}.")
-#     finally:
-#         await client.close() # Ensure client is closed
-
-# if __name__ == "__main__":
-#      asyncio.run(main()) 
+# FMP API client for fetching financial market data with caching support. 

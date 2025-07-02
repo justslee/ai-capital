@@ -157,8 +157,9 @@ class PriceDataIngestionService:
         if source == "tiingo":
             return await self._fetch_from_tiingo(ticker, start_date, end_date)
         elif source == "alphavantage":
-            # TODO: Implement AlphaVantage fetching
-            logger.warning("AlphaVantage source not yet implemented")
+            # AlphaVantage integration planned for future implementation
+            # Current focus is on Tiingo as the primary data source
+            logger.warning("AlphaVantage source not yet implemented - use 'tiingo' as data source")
             return None
         else:
             logger.error(f"Unsupported data source: {source}")
@@ -218,7 +219,7 @@ class PriceDataIngestionService:
         ticker: str,
         data: List[PriceDataPoint], 
         db: AsyncSession
-    ) -> tuple[int, int]:
+    ) -> tuple:
         """
         Store price data in database using upsert (insert or update).
         

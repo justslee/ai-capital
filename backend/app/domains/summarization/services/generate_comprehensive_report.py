@@ -1,17 +1,4 @@
-"""
-Comprehensive SEC Filing Report Generator
-
-This module generates detailed, comprehensive reports from SEC filings that include:
-- Revenue breakdown and margins analysis
-- Geographic revenue mix
-- Production, deliveries and unit economics
-- Operating costs and leverage
-- Balance sheet and cash flow analysis
-- Capital expenditures and R&D investments
-- Outlook and strategy
-- Risk factors and regulatory environment
-- Management discussion and policy changes
-"""
+"""Comprehensive SEC filing report generator for institutional investors."""
 
 import psycopg2
 import sys
@@ -23,39 +10,37 @@ import openai
 import time
 from typing import Dict, List, Optional
 
-# --- Configuration ---
+# Configuration
 COMPREHENSIVE_REPORT_MODEL = "gpt-4-turbo"
-MAX_TOKENS_FOR_COMPREHENSIVE_REPORT = 4000  # Allow for much longer, detailed reports
+MAX_TOKENS_FOR_COMPREHENSIVE_REPORT = 4000
 SOURCE_SUMMARIES_MODEL_NAME = "gpt-4-turbo"
-# Expanded source sections for comprehensive analysis
 SOURCE_SECTION_KEYS = sorted([
     "Business", 
     "Risk Factors", 
     "MD&A",
-    "Financial Statements"  # If available
+    "Financial Statements"
 ])
 
-# --- Load .env and set API Keys & DB URL ---
+# Environment setup
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 DOTENV_PATH = os.path.join(PROJECT_ROOT, '.env')
 
 if os.path.exists(DOTENV_PATH):
-    print(f"Loading .env file from: {DOTENV_PATH}")
     load_dotenv(dotenv_path=DOTENV_PATH)
 else:
-    print(f"Warning: .env file not found at {DOTENV_PATH}. Ensure environment variables are set.")
+    print(f"Warning: .env file not found at {DOTENV_PATH}")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not DATABASE_URL:
-    print("Error: DATABASE_URL not found.")
+    print("Error: DATABASE_URL not found")
     sys.exit(1)
 if not OPENAI_API_KEY:
-    print("Error: OPENAI_API_KEY not found.")
+    print("Error: OPENAI_API_KEY not found")
     sys.exit(1)
 
-# --- Database Connection Parameters ---
+# Database connection
 parsed_url = urlparse(DATABASE_URL.replace("+asyncpg", ""))
 conn_params = {
     'dbname': parsed_url.path[1:],
@@ -75,7 +60,7 @@ def create_comprehensive_reports_table(cursor):
         report_model_name TEXT NOT NULL,
         source_section_keys TEXT[] NOT NULL,
         comprehensive_report_text TEXT NOT NULL,
-        report_metadata JSONB,  -- Store metadata like word count, sections included, etc.
+        report_metadata JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT uq_filing_comprehensive_report UNIQUE (filing_accession_number, report_model_name, source_section_keys)
     );
@@ -83,7 +68,6 @@ def create_comprehensive_reports_table(cursor):
     CREATE INDEX IF NOT EXISTS idx_comprehensive_model ON sec_comprehensive_reports(report_model_name);
     """
     cursor.execute(table_creation_query)
-    print("'sec_comprehensive_reports' table checked/created successfully.")
 
 def call_openai_api(openai_client_instance, prompt_messages, model_name, max_tokens_output):
     """Call OpenAI API with error handling."""
@@ -92,7 +76,7 @@ def call_openai_api(openai_client_instance, prompt_messages, model_name, max_tok
             model=model_name,
             messages=prompt_messages,
             max_tokens=max_tokens_output,
-            temperature=0.2,  # Lower temperature for more factual, consistent output
+            temperature=0.2,
             top_p=1.0,
             frequency_penalty=0.0,
             presence_penalty=0.0
@@ -100,19 +84,17 @@ def call_openai_api(openai_client_instance, prompt_messages, model_name, max_tok
         if response.choices and response.choices[0].message:
             return response.choices[0].message.content.strip()
         else:
-            print("Warning: OpenAI API response did not contain expected choices or message content.")
+            print("Warning: Invalid OpenAI API response")
             return None
     except openai.APIError as e:
         print(f"OpenAI API Error: {e}")
         return None
     except Exception as e:
-        print(f"Unexpected error during OpenAI API call: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error during OpenAI API call: {e}")
         return None
 
 def get_filing_metadata(cursor, accession_number: str) -> Dict:
-    """Get basic filing metadata for context."""
+    """Get filing metadata."""
     cursor.execute(
         """SELECT ticker, filing_type, filing_date
            FROM sec_filings WHERE accession_number = %s""",
@@ -128,7 +110,7 @@ def get_filing_metadata(cursor, accession_number: str) -> Dict:
     return {}
 
 def create_comprehensive_report_prompt(filing_metadata: Dict, section_summaries: List[Dict]) -> str:
-    """Create a comprehensive prompt for detailed financial analysis."""
+    """Create comprehensive analysis prompt."""
     
     ticker = filing_metadata.get("ticker", "COMPANY")
     form_type = filing_metadata.get("form_type", "10-K")

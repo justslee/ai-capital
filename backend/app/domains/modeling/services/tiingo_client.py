@@ -5,14 +5,20 @@ Client for interacting with the Tiingo API to fetch financial data.
 Supports stock prices, index data, and metadata.
 """
 
+# Standard library imports
 import asyncio
+import json
 import logging
-from typing import List, Optional, Dict, Any, Union
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional, Union, Any
+
+# Third-party imports
 import aiohttp
 import pandas as pd
 from decimal import Decimal
+from pydantic import ValidationError
 
+# Domain imports (relative)
 from ..config.modeling_config import get_modeling_config
 from ..models.market_data import PriceDataPoint, TickerInfo, TiingoDataResponse
 
