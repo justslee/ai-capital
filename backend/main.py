@@ -1,29 +1,40 @@
-from fastapi import FastAPI
-from app.api.endpoints import summary_endpoint # Corrected import path assuming summary_endpoint.py is in app/api/endpoints
-from app.core.config import DATABASE_URL, OPENAI_API_KEY # To trigger early config load and checks
 import sys
+import os
+from fastapi import FastAPI
+from app.api.deps import get_db
+from app.domains.summarization.api.summary_endpoint import router as summary_router
+from app.domains.valuation.api.valuation_endpoints import router as valuation_router
+from app.domains.modeling.api.modeling_endpoints import router as modeling_router
 
-# Perform a basic check that essential configs are loaded.
-# app.core.config already prints errors if these are missing.
-if not DATABASE_URL or not OPENAI_API_KEY:
+# Check for required environment variables
+if not os.getenv("DATABASE_URL") or not os.getenv("OPENAI_API_KEY"):
     print("CRITICAL: FastAPI application cannot start due to missing DATABASE_URL or OPENAI_API_KEY.", file=sys.stderr)
     print("Please ensure your .env file is correctly set up at the project root and contains these variables.", file=sys.stderr)
-    # sys.exit(1) # In a deployed app, this might cause the process to fail to start, which is often desired.
+    sys.exit(1)
 
 app = FastAPI(
-    title="SEC Filing Summarization API",
-    description="API to retrieve and generate summaries of SEC filings, including detailed top-level summaries for financial analysis.",
-    version="0.1.0"
+    title="AI Capital API",
+    description="AI-powered capital markets analysis platform",
+    version="1.0.0"
 )
 
-# Include the summary router
-app.include_router(summary_endpoint.router, prefix="/api/v1", tags=["Summaries"])
+# Include routers
+app.include_router(summary_router, prefix="/api/v1/summarization", tags=["summarization"])
+app.include_router(valuation_router, prefix="/api/v1/valuation", tags=["valuation"]) 
+app.include_router(modeling_router, prefix="/api/v1/modeling", tags=["modeling"])
 
-@app.get("/health", tags=["Health"])
+# Commented out router - needs investigation:
+# app.include_router(duckdb_router, prefix="/api/v1/duckdb", tags=["duckdb"])
+
+@app.get("/")
+async def root():
+    return {"message": "AI Capital API is running"}
+
+@app.get("/health")
 async def health_check():
-    """Basic health check endpoint."""
-    # In a real app, you might check DB connectivity or other critical service statuses here.
-    return {"status": "ok", "message": "API is running"}
+    return {"status": "healthy"}
+
+# Application ready - silent startup
 
 # To run this application (from the project root directory, e.g., /Users/justinlee/ai_capital):
 # poetry run uvicorn app.main:app --reload  (if using Poetry)
@@ -31,6 +42,4 @@ async def health_check():
 # python -m uvicorn app.main:app --reload (if uvicorn is in your Python path)
 # 
 # The API will then be available at http://127.0.0.1:8000
-# The summary endpoint will be at http://127.0.0.1:8000/api/v1/summary/{ticker}/{year}/{form_type}
-
-print("FastAPI app initialized. Routers included. Ready to run with Uvicorn.") 
+# The summary endpoint will be at http://127.0.0.1:8000/api/v1/summary/{ticker}/{year}/{form_type} 
