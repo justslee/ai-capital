@@ -1,16 +1,30 @@
-from fastapi import APIRouter, HTTPException, Path
-from app.domains.summarization.core.summary_generation import generate_and_store_top_level_summary
-from app.db.database_utils import db_cursor # For direct DB queries if needed by the endpoint logic
-import psycopg2
+# Standard library imports
 import sys
+
+# Third-party imports
+import psycopg2
+from fastapi import APIRouter, HTTPException, Path
+
+# App imports
+from app.db.database_utils import db_cursor
+
+# Domain imports (relative)
+from ..services.summary_generation import generate_and_store_top_level_summary
+
+# Shared imports
+from ...shared.response_models import SummarizationResponse, create_success_response
+from ...shared.exceptions import (
+    FilingNotFoundException, SummaryGenerationException, 
+    PrerequisiteDataMissingException, handle_domain_exception
+)
 
 router = APIRouter()
 
-@router.get("/summary/{ticker}/{year}/{form_type}")
+@router.get("/summary/{ticker}/{year}/{form_type}", response_model=SummarizationResponse)
 async def get_filing_summary(
     ticker: str = Path(..., title="Stock Ticker", description="The ticker symbol of the company (e.g., AAPL)", min_length=1, max_length=10),
     year: int = Path(..., title="Filing Year", description="The four-digit year of the filing (e.g., 2023)"),
-    form_type: str = Path(..., title="Form Type", description="The SEC form type (e.g., 10-K, 10-Q). Currently optimized for 10-K.", regex="^(10-K|10-Q)$")
+    form_type: str = Path(..., title="Form Type", description="The SEC form type (e.g., 10-K, 10-Q). Currently optimized for 10-K.", pattern="^(10-K|10-Q)$")
 ):
     """
     Provides a top-level summary for a specified company filing.
@@ -20,8 +34,7 @@ async def get_filing_summary(
     Otherwise, it's generated on-the-fly using GPT-4, stored, and then returned.
     """
     requested_form_type_upper = form_type.upper()
-    print(f"Received request for summary: Ticker={ticker}, Year={year}, Form Type Input={requested_form_type_upper}")
-
+    
     if requested_form_type_upper != "10-K":
         raise HTTPException(
             status_code=400,
@@ -44,38 +57,43 @@ async def get_filing_summary(
             result = cursor.fetchone()
             if result:
                 accession_number = result[0]
-                print(f"Found accession_number: {accession_number} for Ticker: {ticker}, Year: {year}, DB_Filing_Type: {requested_form_type_upper}")
             else:
-                print(f"No matching '10-K' filing found for Ticker: {ticker}, Year: {year}")
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"No '10-K' filing found for ticker '{ticker}' in year {year}."
-                )
+                raise FilingNotFoundException(ticker.upper(), year, requested_form_type_upper)
+                
     except psycopg2.Error as db_err:
-        print(f"Database error while fetching accession number: {db_err}", file=sys.stderr)
         raise HTTPException(status_code=500, detail="Database error while retrieving filing information.")
+    except FilingNotFoundException:
+        raise
     except Exception as e:
-        print(f"Unexpected error while fetching accession number: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
     if not accession_number:
-        # This case should ideally be caught above, but as a safeguard.
-        raise HTTPException(status_code=404, detail=f"Could not determine accession number for {ticker} {year} {form_type}.")
+        raise FilingNotFoundException(ticker.upper(), year, requested_form_type_upper)
 
     try:
         summary_text = await generate_summary_async_wrapper(accession_number)
-        # The summary text here is expected to be a pre-formatted string (e.g. Markdown-like from LLM)
-        # For JSON output, we might want to structure it, but user asked for "JSON of summary bullets"
-        # If the LLM already formats it with bullets, we can return it directly or parse it.
-        # For now, returning the raw text as a JSON string value.
-        return {"ticker": ticker, "year": year, "form_type": form_type, "accession_number": accession_number, "summary": summary_text}
+        
+        # Return standardized response
+        return SummarizationResponse(
+            status="success",
+            message="Summary generated successfully",
+            data={
+                "summary": summary_text
+            },
+            ticker=ticker.upper(),
+            year=year,
+            form_type=form_type,
+            accession_number=accession_number
+        )
+        
     except ValueError as ve: # Raised by generate_and_store_top_level_summary if prerequisites missing
-        print(f"ValueError during summary generation for {accession_number}: {ve}")
-        raise HTTPException(status_code=409, detail=str(ve)) # 409 Conflict - prerequisite data missing
+        # Check if it's a prerequisite data missing error
+        if "missing" in str(ve).lower():
+            raise PrerequisiteDataMissingException(accession_number, ["section summaries"])
+        else:
+            raise SummaryGenerationException(accession_number, str(ve))
     except Exception as e:
-        print(f"Error generating or retrieving summary for {accession_number}: {e}")
-        # Consider more specific error codes based on exception types from generate_and_store_top_level_summary
-        raise HTTPException(status_code=500, detail=f"Failed to generate or retrieve summary: {str(e)}")
+        raise handle_domain_exception(e)
 
 async def generate_summary_async_wrapper(accession_number: str):
     # FastAPI runs in an async event loop. CPU-bound tasks like LLM calls or intensive processing

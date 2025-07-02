@@ -6,31 +6,29 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup, NavigableString, Tag
 from collections import OrderedDict
-from datetime import datetime # Added for filing_year extraction
+from datetime import datetime
 
-# Load .env file from the project root
+# Environment setup
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DOTENV_PATH = os.path.join(PROJECT_ROOT, '.env')
 if os.path.exists(DOTENV_PATH):
-    print(f"Loading environment variables from: {DOTENV_PATH}")
     load_dotenv(dotenv_path=DOTENV_PATH)
 else:
     print(f"Warning: .env file not found at {DOTENV_PATH}")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-# TICKER_TO_CHECK = "AAPL" # Will be replaced by a list
-TICKERS_TO_PROCESS = ["AAPL", "TSLA"] # List of tickers to process
+TICKERS_TO_PROCESS = ["AAPL", "TSLA"]
 
-# Chunking size parameters
+# Chunking parameters
 MIN_CHARS_PER_CHUNK = 500
 TARGET_CHARS_PER_CHUNK = 1500
 MAX_CHARS_PER_CHUNK = 2500
 
-# Markers for special content
+# Content markers
 TABLE_START_MARKER = "%%%START_TABLE%%%"
 TABLE_END_MARKER = "%%%END_TABLE%%%"
-FOOTNOTE_START_MARKER = "%%%START_FOOTNOTE%%%" # Renamed
-FOOTNOTE_END_MARKER = "%%%END_FOOTNOTE%%%" # Renamed
+FOOTNOTE_START_MARKER = "%%%START_FOOTNOTE%%%"
+FOOTNOTE_END_MARKER = "%%%END_FOOTNOTE%%%"
 
 if not DATABASE_URL:
     print("Error: DATABASE_URL not found in environment variables.")
@@ -43,85 +41,64 @@ def normalize_text(text):
     text = text.replace('&lt;', '<')
     text = text.replace('&gt;', '>')
     
-    # Replace Unicode whitespace and special characters
+    # Replace Unicode characters
     text = text.replace('\xa0', ' ')
     text = text.replace('\u2013', '-')
     text = text.replace('\u2014', '--')
     
-    # Remove XBRL-related content more aggressively (temporarily commented out for debugging)
-    # text = re.sub(r'http://[^\s]+', '', text)  # Remove URLs
-    # text = re.sub(r'aapl-\d{8}', '', text)  # Remove AAPL date codes
-    # text = re.sub(r'P\d+Y', '', text)  # Remove period codes
-    # text = re.sub(r'0000\d+', '', text)  # Remove CIK numbers
-    # text = re.sub(r'#[A-Za-z]+', '', text)  # Remove hash references
-    
     lines = text.split('\n')
     normalized_lines = []
     for line in lines:
-        # Remove line numbers at the start of lines
         line = re.sub(r'^\d+\s+', '', line)
-        # Remove page breaks and horizontal rules (if they appear on their own line)
         line = re.sub(r'-{3,}.*?Page \d+.*?-{3,}', '', line)
         line = re.sub(r'-{3,}', '', line)
-        # Remove repeating headers/footers (if they are on their own line and all caps)
-        if line.isupper() and len(line) > 10:
-             # More specific check for typical header/footer patterns
-            if not re.search(r'(ITEM|PART|SECTION|NOTE|TABLE|INDEX)', line):
-                line = '' # Remove likely headers/footers
         
-        # Normalize spaces and tabs within the line, but keep the line itself
+        # Remove headers/footers
+        if line.isupper() and len(line) > 10:
+            if not re.search(r'(ITEM|PART|SECTION|NOTE|TABLE|INDEX)', line):
+                line = ''
+        
         line = re.sub(r'[ \t]+', ' ', line).strip()
-        if line: # Keep non-empty lines
+        if line:
             normalized_lines.append(line)
             
-    # Join lines back, ensuring not too many blank lines
     text = '\n'.join(normalized_lines)
-    text = re.sub(r'\n{3,}', '\n\n', text) # Collapse 3+ newlines to 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
     text = text.strip()
     
     return text
 
-# --- Chunking Logic (Restored based on Steps 3, 4, 5) ---
 def detect_subheading(line_text, lines_around, line_idx):
-    """
-    Heuristics to detect if a line is a subheading.
-    `lines_around` is a small window of lines (e.g. previous, current, next).
-    `line_idx` is the index of line_text within lines_around (e.g., 1 if prev, curr, next).
-    """
+    """Detect if a line is a subheading using heuristics."""
     line_text = line_text.strip()
-    if not line_text or len(line_text) > 150: # Too short or too long
+    if not line_text or len(line_text) > 150:
         return None
 
-    # Ends with punctuation typical of a sentence? Likely not a subheading.
     if line_text.endswith(('.', '?', '!')) and not line_text.endswith('...'):
         return None
     
-    # All caps or Title Case are good indicators
     if not (line_text.isupper() or line_text.istitle()):
-        # Allow if it has a colon and isn't too long, or if it has mixed case with numbers
         if ':' not in line_text and not (any(c.isdigit() for c in line_text) and not line_text.islower()):
             return None
 
-    # Shorter lines are more likely to be subheadings
-    if len(line_text.split()) > 10 and '.' in line_text: # Heuristic: longer lines with periods are likely sentences
+    if len(line_text.split()) > 10 and '.' in line_text:
          return None
 
-    # Check context: blank lines before/after can indicate subheading
     prev_line = lines_around[line_idx-1].strip() if line_idx > 0 else ""
     next_line = lines_around[line_idx+1].strip() if line_idx < len(lines_around)-1 else ""
 
-    if prev_line == "" and next_line != "": # Blank line before, content after
+    if prev_line == "" and next_line != "":
         return line_text
     
-    # If it's title cased and the next line starts with a capital letter (likely new paragraph)
     if line_text.istitle() and next_line and next_line[0].isupper():
         return line_text
 
-    return None # Default to not a subheading
+    return None
 
 def _split_text_by_sentences(text, min_chars, target_chars, max_chars):
-    if not text.strip(): return []
-    # Simple sentence split, can be improved with NLTK/spaCy
+    if not text.strip(): 
+        return []
+    
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     
     chunks = []
@@ -129,40 +106,39 @@ def _split_text_by_sentences(text, min_chars, target_chars, max_chars):
     current_len = 0
     for s in sentences:
         s_len = len(s)
-        if current_len + s_len + (len(current_chunk_sentences)) > max_chars and current_len > 0 :
+        if current_len + s_len + (len(current_chunk_sentences)) > max_chars and current_len > 0:
             chunks.append(" ".join(current_chunk_sentences))
             current_chunk_sentences = [s]
             current_len = s_len
-        elif current_len + s_len + (len(current_chunk_sentences)) > max_chars and current_len == 0 : # Sentence itself is too long
-            # Split very long sentence by target_chars
+        elif current_len + s_len + (len(current_chunk_sentences)) > max_chars and current_len == 0:
+            # Split very long sentence
             start = 0
             while start < s_len:
                 end = min(start + target_chars, s_len)
-                # Try to find a space to break on if possible, to avoid breaking mid-word
                 if end < s_len and s[end] != ' ':
                     space_idx = s.rfind(' ', start, end)
                     if space_idx != -1 and space_idx > start:
                         end = space_idx
                 chunks.append(s[start:end].strip())
-                start = end + 1 # Skip space
-            current_chunk_sentences = [] # Reset as this long sentence was handled
+                start = end + 1
+            current_chunk_sentences = []
             current_len = 0
         else:
             current_chunk_sentences.append(s)
             current_len += s_len
-            if current_len >= min_chars : # Reach min chars, consider it a chunk if target is also met or exceeded
-                 if current_len >= target_chars or len(current_chunk_sentences) > 3: # Or more than 3 sentences
+            if current_len >= min_chars:
+                 if current_len >= target_chars or len(current_chunk_sentences) > 3:
                     chunks.append(" ".join(current_chunk_sentences))
                     current_chunk_sentences = []
                     current_len = 0
 
-    if current_chunk_sentences: # Add any remaining sentences
+    if current_chunk_sentences:
         chunks.append(" ".join(current_chunk_sentences))
     return [c for c in chunks if c.strip()]
 
 
 def _chunk_segment_by_paragraphs_and_sentences(segment_text, current_subheading, min_c, target_c, max_c):
-    """ Chunks a narrative text segment using paragraphs and then sentences. """
+    """Chunk narrative text using paragraphs and sentences."""
     chunks_with_meta = []
     paragraphs = segment_text.split('\n\n')
     
@@ -170,13 +146,13 @@ def _chunk_segment_by_paragraphs_and_sentences(segment_text, current_subheading,
     current_len = 0
     for para_idx, p_text in enumerate(paragraphs):
         p_text = p_text.strip()
-        if not p_text: continue
+        if not p_text: 
+            continue
         p_len = len(p_text)
 
         if current_len + p_len + len(current_paragraph_group) > max_c and current_len > 0:
-            # Finalize current group
             grouped_text = "\n\n".join(current_paragraph_group)
-            if len(grouped_text) > max_c : # If even after grouping, it's too big, split it by sentence
+            if len(grouped_text) > max_c:
                 sentence_chunks = _split_text_by_sentences(grouped_text, min_c, target_c, max_c)
                 for sc_idx, sc in enumerate(sentence_chunks):
                     chunks_with_meta.append({'text': sc, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
@@ -184,7 +160,7 @@ def _chunk_segment_by_paragraphs_and_sentences(segment_text, current_subheading,
                  chunks_with_meta.append({'text': grouped_text, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
             current_paragraph_group = [p_text]
             current_len = p_len
-        elif current_len + p_len + len(current_paragraph_group) > max_c and current_len == 0: # Paragraph itself is too long
+        elif current_len + p_len + len(current_paragraph_group) > max_c and current_len == 0:
             sentence_chunks = _split_text_by_sentences(p_text, min_c, target_c, max_c)
             for sc_idx, sc in enumerate(sentence_chunks):
                 chunks_with_meta.append({'text': sc, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
@@ -193,31 +169,27 @@ def _chunk_segment_by_paragraphs_and_sentences(segment_text, current_subheading,
         else:
             current_paragraph_group.append(p_text)
             current_len += p_len
-            if current_len >= min_c : # Check if we should form a chunk
-                if current_len >= target_c or len(current_paragraph_group) > 2: # Heuristic: 2+ paras meeting min_chars
+            if current_len >= min_c:
+                if current_len >= target_c or len(current_paragraph_group) > 2:
                     grouped_text = "\n\n".join(current_paragraph_group)
                     chunks_with_meta.append({'text': grouped_text, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
                     current_paragraph_group = []
                     current_len = 0
                     
-    if current_paragraph_group: # Add remaining paragraph group
+    if current_paragraph_group:
         grouped_text = "\n\n".join(current_paragraph_group)
-        if len(grouped_text) > max_c: # If remaining is too large, split by sentence.
+        if len(grouped_text) > max_c:
              sentence_chunks = _split_text_by_sentences(grouped_text, min_c, target_c, max_c)
              for sc_idx, sc in enumerate(sentence_chunks):
                 chunks_with_meta.append({'text': sc, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
-        elif grouped_text.strip(): # ensure it's not just whitespace
+        elif grouped_text.strip():
              chunks_with_meta.append({'text': grouped_text, 'is_table': False, 'is_footnote': False, 'subheading': current_subheading})
              
     return chunks_with_meta
 
 
 def chunk_section_content(section_text):
-    """
-    Chunks section content based on structure: tables, (future: footnotes),
-    subheadings, paragraphs, and sentences.
-    Returns a list of dicts: {'text': chunk_text, 'is_table': bool, 'is_footnote': bool, 'subheading': str_or_None}
-    """
+    """Chunk section content by structure: tables, footnotes, subheadings, paragraphs."""
     final_chunks = []
     
     parts = []
@@ -238,7 +210,6 @@ def chunk_section_content(section_text):
             marker_type = 'footnote'
 
         if marker_type:
-            # Narrative before marker
             if next_marker_pos > 0:
                 parts.append({'type': 'narrative', 'content': remaining_text[:next_marker_pos]})
             
@@ -246,7 +217,7 @@ def chunk_section_content(section_text):
                 end_marker_idx = remaining_text.find(TABLE_END_MARKER, next_marker_pos)
                 start_len = len(TABLE_START_MARKER)
                 end_len = len(TABLE_END_MARKER)
-            else: # footnote
+            else:
                 end_marker_idx = remaining_text.find(FOOTNOTE_END_MARKER, next_marker_pos)
                 start_len = len(FOOTNOTE_START_MARKER)
                 end_len = len(FOOTNOTE_END_MARKER)
@@ -255,12 +226,11 @@ def chunk_section_content(section_text):
                 marker_content = remaining_text[next_marker_pos + start_len : end_marker_idx].strip()
                 parts.append({'type': marker_type, 'content': marker_content})
                 remaining_text = remaining_text[end_marker_idx + end_len:]
-            else: # Should not happen if markers are paired and well-formed
-                # Treat rest as narrative if end marker is missing
+            else:
                 parts.append({'type': 'narrative', 'content': remaining_text[next_marker_pos:]})
                 remaining_text = ""
                 break 
-        else: # No more special markers
+        else:
             if remaining_text.strip():
                 parts.append({'type': 'narrative', 'content': remaining_text})
             break
