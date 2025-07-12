@@ -1,7 +1,17 @@
+import logging
 from fastapi import FastAPI
 
+# Configure logging to show INFO level logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Set specific loggers to INFO level
+logging.getLogger("app.domains.data_collection.tiingo_client").setLevel(logging.INFO)
+
 # Import public API routers (client-facing)
-from app.domains.summarization.api.summary_endpoint import router as summarization_router
+from app.domains.summarizer.api.summary_endpoint import router as summarization_router
 from app.domains.valuation.api.public_endpoints import router as public_valuation_router
 from app.domains.modeling.api.public_endpoints import router as public_modeling_router
 
@@ -47,7 +57,7 @@ async def read_root():
                 "access": "Internal use only - not for external clients",
                 "categories": [
                     "Data ingestion and management",
-                    "Storage operations",
+                    "Storage operations", 
                     "Health monitoring",
                     "Raw financial data access"
                 ]

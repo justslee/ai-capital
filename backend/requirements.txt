@@ -3,8 +3,6 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 sqlalchemy[asyncio]
-asyncpg
-psycopg2-binary
 aiohttp
 pandas
 numpy
@@ -18,6 +16,8 @@ python-dotenv
 duckdb>=0.9.0
 pyarrow>=14.0.0
 click>=8.0.0
+edgartools
+fredapi
 
 # Additional data processing
 polars>=0.20.0  # Optional: Even faster DataFrame operations
@@ -25,3 +25,9 @@ fastparquet>=2023.10.0  # Alternative Parquet engine
 # S3 Storage Dependencies
 boto3>=1.26.0
 botocore>=1.29.0
+
+# Testing
+pytest
+
+# Database Drivers
+psycopg2-binary

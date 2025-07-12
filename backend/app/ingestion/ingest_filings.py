@@ -4,8 +4,8 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionFactory
-from app.domains.summarization.services.sec_client import SECClient
-from app.domains.summarization.services.filings_service import store_filing
+from app.domains.data_collection.sec_client import SECClient
+from app.domains.summarizer.services.filings_service import store_filing, get_filing
 from app.sec_utils import get_company_info_by_ticker
 
 # Configure basic logging
