@@ -31,3 +31,6 @@ pytest
 
 # Database Drivers
 psycopg2-binary
+
+# ARIMA Modeling
+statsmodels>=0.14.0
