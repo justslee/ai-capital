@@ -11,7 +11,23 @@ class Settings(BaseSettings):
     pinecone_api_key: Optional[str] = None
     pinecone_environment: Optional[str] = None
     openai_api_key: str
-    # Add other Pinecone/OpenAI settings if needed, e.g., Pinecone index name, OpenAI model
+    
+    # AWS Credentials
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_region: Optional[str] = 'us-east-1'
+    
+    # S3 Storage
+    s3_bucket: Optional[str] = None
+    s3_prefix: Optional[str] = None
+
+    # External API Keys
+    fred_api_key: Optional[str] = None
+    tiingo_api_key: Optional[str] = None
+    alpha_vantage_api_key: Optional[str] = None
+
+    # Storage Configuration
+    storage_type: Optional[str] = None
 
     class Config:
         env_file = '.env'

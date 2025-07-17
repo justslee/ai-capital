@@ -134,4 +134,4 @@ cython_debug/
 
 # Ignore custom files
 claude.md
-/exports/ 
+/exports/ tasks/todo.md

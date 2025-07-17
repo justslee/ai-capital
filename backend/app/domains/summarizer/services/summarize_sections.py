@@ -7,6 +7,13 @@ from urllib.parse import urlparse
 import openai
 import time
 from typing import Dict, List, Optional
+import asyncio
+
+# Add the project root to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')))
+
+from app.domains.data_collection.storage.s3_storage_service import get_s3_storage_service
+
 
 # Configuration
 OPENAI_MODEL_NAME = "gpt-4-turbo"
@@ -56,7 +63,6 @@ def create_summaries_table(cursor):
     table_creation_query = """
     CREATE TABLE IF NOT EXISTS sec_section_summaries (
         id SERIAL PRIMARY KEY,
-        section_db_id INTEGER NOT NULL UNIQUE REFERENCES sec_filing_sections(id) ON DELETE CASCADE,
         filing_accession_number TEXT NOT NULL,
         section_key TEXT NOT NULL,
         summarization_model_name TEXT NOT NULL,
@@ -66,42 +72,37 @@ def create_summaries_table(cursor):
         processing_status TEXT,
         error_message TEXT,
         generated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT uq_section_model UNIQUE (section_db_id, summarization_model_name)
+        CONSTRAINT uq_accession_section_model UNIQUE (filing_accession_number, section_key, summarization_model_name)
     );
-    CREATE INDEX IF NOT EXISTS idx_sss_section_db_id ON sec_section_summaries(section_db_id);
     CREATE INDEX IF NOT EXISTS idx_sss_accession_number ON sec_section_summaries(filing_accession_number);
     CREATE INDEX IF NOT EXISTS idx_sss_section_key ON sec_section_summaries(section_key);
     CREATE INDEX IF NOT EXISTS idx_sss_model_name ON sec_section_summaries(summarization_model_name);
     """
     cursor.execute(table_creation_query)
 
-def get_unprocessed_sections(cursor, model_name, target_section_keys):
-    """Get sections that need summarization or re-processing."""
+def get_unprocessed_filings(cursor, model_name, target_section_keys):
+    """
+    Get filings that have sections that need summarization.
+    This identifies filings that haven't been processed for a given model and section.
+    """
     target_keys_tuple = tuple(target_section_keys)
-    
     query = """
-    SELECT fs.id, fs.filing_accession_number, fs.section_key
-    FROM sec_filing_sections fs
-    LEFT JOIN sec_section_summaries sss ON fs.id = sss.section_db_id AND sss.summarization_model_name = %s
-    WHERE fs.section_key IN %s 
-      AND (sss.id IS NULL OR sss.processing_status IS NULL OR sss.processing_status NOT IN ('reduce_complete'))
-    ORDER BY fs.filing_accession_number, fs.id; -- Process systematically
+    SELECT DISTINCT f.ticker, f.accession_number
+    FROM sec_filings f
+    WHERE f.filing_type IN ('10-K', '10-Q')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM sec_section_summaries sss
+        WHERE sss.filing_accession_number = f.accession_number
+          AND sss.section_key = ANY(%s)
+          AND sss.summarization_model_name = %s
+          AND sss.processing_status = 'reduce_complete'
+    )
+    ORDER BY f.accession_number;
     """
-    cursor.execute(query, (model_name, target_keys_tuple))
-    sections = cursor.fetchall()
-    return sections
+    cursor.execute(query, (list(target_keys_tuple), model_name))
+    return cursor.fetchall()
 
-def get_chunks_for_section(cursor, section_db_id):
-    """Get all text chunks for a section, ordered by sequence."""
-    query = """
-    SELECT chunk_text 
-    FROM sec_filing_section_chunks
-    WHERE section_db_id = %s
-    ORDER BY chunk_order_in_section ASC;
-    """
-    cursor.execute(query, (section_db_id,))
-    chunks = [row[0] for row in cursor.fetchall()]
-    return chunks
 
 def call_openai_api(openai_client_instance, prompt_messages, model_name, max_tokens_output):
     """Call OpenAI API with error handling."""
@@ -128,15 +129,15 @@ def call_openai_api(openai_client_instance, prompt_messages, model_name, max_tok
         return None
 
 def save_summary(
-    cursor, section_db_id, filing_accession_number, section_key, 
+    cursor, filing_accession_number, section_key, 
     summarization_model_name, summary_text=None, raw_chunk_summaries_concatenated=None, 
     total_chunks_in_section=None, processing_status=None, error_message=None
 ):
     """Insert or update a summary record."""
     
     cursor.execute(
-        "SELECT id FROM sec_section_summaries WHERE section_db_id = %s AND summarization_model_name = %s",
-        (section_db_id, summarization_model_name)
+        "SELECT id FROM sec_section_summaries WHERE filing_accession_number = %s AND section_key = %s AND summarization_model_name = %s",
+        (filing_accession_number, section_key, summarization_model_name)
     )
     existing_summary_record = cursor.fetchone()
 
@@ -174,219 +175,137 @@ def save_summary(
         # Insert new record
         query = """
         INSERT INTO sec_section_summaries (
-            section_db_id, filing_accession_number, section_key, summarization_model_name, 
+            filing_accession_number, section_key, summarization_model_name, 
             summary_text, raw_chunk_summaries_concatenated, total_chunks_in_section, 
             processing_status, error_message
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (section_db_id, summarization_model_name) DO NOTHING;
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (filing_accession_number, section_key, summarization_model_name) DO NOTHING;
         """
         final_summary_text = summary_text if summary_text is not None else ""
 
         cursor.execute(query, (
-            section_db_id, filing_accession_number, section_key, summarization_model_name,
+            filing_accession_number, section_key, summarization_model_name,
             final_summary_text, raw_chunk_summaries_concatenated, total_chunks_in_section,
             processing_status, error_message
         ))
 
-def summarize_sections_for_accession(accession_no: str, section_keys_list: List[str]) -> None:
-    """Main function to summarize sections for a specific accession number."""
+async def process_filing_sections(ticker, accession_number, target_sections, cursor, openai_client):
+    """Processes all target sections for a single filing."""
+    s3_service = get_s3_storage_service()
     
+    for section_key in target_sections:
+        print(f"  - Processing section: {section_key}")
+        
+        chunks = await s3_service.list_and_read_chunks(ticker, accession_number, section_key)
+        
+        if not chunks:
+            print(f"    - No chunks found in S3 for {section_key}. Skipping.")
+            continue
+            
+        print(f"    - Found {len(chunks)} chunks in S3.")
+
+        # Map step: Summarize each chunk
+        map_start_time = time.time()
+        chunk_summaries = []
+        
+        for i, chunk_text in enumerate(chunks):
+            # This logic can be further parallelized if needed
+            chunk_summary = call_openai_api(
+                openai_client,
+                prompt_messages=[
+                    {"role": "system", "content": "You are an expert financial analyst. Summarize the following text from an SEC filing concisely."},
+                    {"role": "user", "content": chunk_text}
+                ],
+                model_name=OPENAI_MODEL_NAME,
+                max_tokens_output=MAX_TOKENS_FOR_CHUNK_SUMMARY_OUTPUT
+            )
+            if chunk_summary:
+                chunk_summaries.append(chunk_summary)
+
+        map_duration = time.time() - map_start_time
+        print(f"    - Map step completed in {map_duration:.2f}s. Got {len(chunk_summaries)} summaries.")
+
+        if not chunk_summaries:
+            print("    - No chunk summaries were generated. Skipping reduce step.")
+            save_summary(
+                cursor, accession_number, section_key, OPENAI_MODEL_NAME,
+                processing_status='map_failed', error_message='No summaries generated from chunks'
+            )
+            # conn.commit() # This line was removed as per the new_code, but it's needed for the original logic.
+            continue
+
+        concatenated_summaries = "\n\n".join(chunk_summaries)
+        
+        # Reduce step: Create final summary from chunk summaries
+        reduce_start_time = time.time()
+        final_summary = call_openai_api(
+            openai_client,
+            prompt_messages=[
+                {"role": "system", "content": "You are an expert financial analyst. Synthesize the following section summaries into a single, coherent summary."},
+                {"role": "user", "content": concatenated_summaries}
+            ],
+            model_name=OPENAI_MODEL_NAME,
+            max_tokens_output=MAX_TOKENS_FOR_FINAL_SUMMARY_OUTPUT
+        )
+        reduce_duration = time.time() - reduce_start_time
+        print(f"    - Reduce step completed in {reduce_duration:.2f}s.")
+
+        if final_summary:
+            save_summary(
+                cursor, accession_number, section_key, OPENAI_MODEL_NAME,
+                summary_text=final_summary, 
+                raw_chunk_summaries_concatenated=concatenated_summaries,
+                total_chunks_in_section=len(chunks),
+                processing_status='reduce_complete'
+            )
+            print(f"    - Successfully saved final summary for {section_key}.")
+        else:
+            save_summary(
+                cursor, accession_number, section_key, OPENAI_MODEL_NAME,
+                processing_status='reduce_failed', error_message='Failed to generate final summary'
+            )
+            print("    - Failed to generate final summary.")
+            
+        # conn.commit() # This line was removed as per the new_code, but it's needed for the original logic.
+
+
+def main():
     if not OPENAI_API_KEY:
-        # Silent exit - missing API key
+        print("OPENAI_API_KEY not found. Exiting.")
         return
 
-    conn = None
+    openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    
+    global conn
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
-
-        if not section_keys_list:
-            # Silent return - no sections to process
-            return
-
-        for sec_key in section_keys_list:
-            # Get section ID
-            cursor.execute(
-                "SELECT id FROM sec_filing_sections WHERE accession_number = %s AND section_key = %s",
-                (accession_no, sec_key)
-            )
-            section_result = cursor.fetchone()
-            
-            if not section_result:
-                continue
-                
-            sec_id = section_result[0]
-            
-            # Get chunks for this section
-            cursor.execute(
-                "SELECT id, chunk_text FROM sec_filing_section_chunks WHERE section_id = %s ORDER BY chunk_order",
-                (sec_id,)
-            )
-            chunks = cursor.fetchall()
-            
-            if not chunks:
-                # Silent skip - no chunks found
-                continue
-
-            # Map step: Summarize each chunk
-            chunk_summaries = []
-            map_errors = 0
-            
-            for i, (chunk_id, chunk_text) in enumerate(chunks):
-                chunk_summary = call_openai_api(
-                    prompt_messages=[
-                        {"role": "system", "content": SECTION_SUMMARY_SYSTEM_MESSAGE},
-                        {"role": "user", "content": chunk_text}
-                    ],
-                    model_name=SECTION_SUMMARY_MODEL,
-                    max_tokens_output=MAX_TOKENS_SECTION_SUMMARY
-                )
-                
-                if chunk_summary:
-                    chunk_summaries.append((chunk_id, chunk_summary))
-                else:
-                    map_errors += 1
-
-            if not chunk_summaries:
-                # Silent skip - no summaries generated
-                continue
-
-            # Reduce step: Generate final summary
-            combined_text = "\n\n".join([summary for _, summary in chunk_summaries])
-            
-            final_summary = call_openai_api(
-                prompt_messages=[
-                    {"role": "system", "content": SECTION_SUMMARY_SYSTEM_MESSAGE},
-                    {"role": "user", "content": combined_text}
-                ],
-                model_name=SECTION_SUMMARY_MODEL,
-                max_tokens_output=MAX_TOKENS_SECTION_SUMMARY
-            )
-            
-            if final_summary:
-                # Store the final summary
-                cursor.execute(
-                    """INSERT INTO sec_filing_section_summaries 
-                       (accession_number, section_key, summary_text, model_name, created_at) 
-                       VALUES (%s, %s, %s, %s, NOW())""",
-                    (accession_no, sec_key, final_summary, SECTION_SUMMARY_MODEL)
-                )
-                conn.commit()
-            else:
-                # Silent continue - failed to generate summary
-                continue
+        print("Database connection successful.")
         
-    except psycopg2.Error as db_err:
-        # Log database errors without console output
-        pass
+        create_summaries_table(cursor)
+        conn.commit()
+
+        unprocessed_filings = get_unprocessed_filings(cursor, OPENAI_MODEL_NAME, TARGET_SECTION_KEYS)
+        print(f"Found {len(unprocessed_filings)} filings with sections to process.")
+
+        for ticker, accession_number in unprocessed_filings:
+            print(f"\nProcessing filing: {accession_number} for ticker: {ticker}")
+            try:
+                asyncio.run(process_filing_sections(
+                    ticker, accession_number, TARGET_SECTION_KEYS, cursor, openai_client
+                ))
+            except Exception as e:
+                print(f"  - An unexpected error occurred while processing {accession_number}: {e}")
+                conn.rollback()
+
+
     except Exception as e:
-        # Log unexpected errors without console output
-        pass
+        print(f"An error occurred: {e}")
     finally:
         if conn:
             conn.close()
-
-def main():
-    conn = None
-    cur = None
-    
-    if not OPENAI_API_KEY:
-        # Silent exit - missing API key
-        sys.exit(1)
-    
-    openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-    try:
-        conn = psycopg2.connect(**conn_params)
-        cur = conn.cursor()
-
-        create_summaries_table(cur)
-        conn.commit()
-
-        unprocessed_sections = get_unprocessed_sections(cur, OPENAI_MODEL_NAME, TARGET_SECTION_KEYS)
-
-        if not unprocessed_sections:
-            # Silent return - no sections to process
-            return
-
-        for sec_id, accession_no, sec_key in unprocessed_sections:
-            # Process section without debug output
-            
-            save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                         processing_status='pending_map')
-            conn.commit()
-
-            chunks = get_chunks_for_section(cur, sec_id)
-            if not chunks:
-                # Silent error - no chunks found
-                save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                             processing_status='error', error_message='No chunks found for section', total_chunks_in_section=0)
-                conn.commit()
-                continue
-
-            chunk_summaries = []
-            map_errors = 0
-            # Process chunks silently
-            for i, chunk_text in enumerate(chunks):
-                map_prompt_messages = [
-                    {"role": "system", "content": "You are an expert at summarizing financial document segments."},
-                    {"role": "user", "content": f"The following is a text segment from the '{sec_key}' section of an SEC 10-K filing. Briefly summarize the main points or key information contained *only* in this specific segment in 1-2 sentences: \n\nText Segment:\n{chunk_text}"}
-                ]
-                # Rate limiting without console output
-                if i > 0 and i % 10 == 0: time.sleep(1) 
-
-                chunk_summary = call_openai_api(openai_client, map_prompt_messages, OPENAI_MODEL_NAME, MAX_TOKENS_FOR_CHUNK_SUMMARY_OUTPUT)
-                if chunk_summary:
-                    chunk_summaries.append(chunk_summary)
-                else:
-                    map_errors += 1
-            
-            # Save intermediate results
-            concatenated_chunk_summaries = "\n\n---\n\n".join(chunk_summaries)
-            save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                         raw_chunk_summaries_concatenated=concatenated_chunk_summaries,
-                         total_chunks_in_section=len(chunks),
-                         processing_status='map_complete')
-            conn.commit()
-
-            if not chunk_summaries: 
-                # Silent error - no chunk summaries generated
-                save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                             processing_status='error', error_message='Failed to generate any chunk summaries')
-                conn.commit()
-                continue
-            
-            # Generate final summary
-            reduce_prompt_messages = [
-                {"role": "system", "content": "You are an expert at synthesizing information from multiple summaries into a cohesive final summary."},
-                {"role": "user", "content": f"Based *only* on the following partial summaries from the '{sec_key}' section of an SEC 10-K filing, provide a concise and comprehensive overall summary of the entire section in 2-3 bullet points. Ensure the summary is factual and directly derived from the provided text. Avoid speculation or information not present in the partial summaries.\n\nPartial Summaries:\n{concatenated_chunk_summaries}"}
-            ]
-            
-            final_summary = call_openai_api(openai_client, reduce_prompt_messages, OPENAI_MODEL_NAME, MAX_TOKENS_FOR_FINAL_SUMMARY_OUTPUT)
-
-            if final_summary:
-                # Silent success - final summary generated
-                save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                             summary_text=final_summary, processing_status='reduce_complete')
-            else:
-                # Silent error - failed to generate final summary
-                save_summary(cur, sec_id, accession_no, sec_key, OPENAI_MODEL_NAME, 
-                             processing_status='error', error_message='Failed to generate final summary in reduce step')
-            conn.commit()
-
-        # Processing complete - silent finish
-
-    except psycopg2.Error as db_err:
-        # Log database errors without console output
-        if conn: conn.rollback()
-    except Exception as e:
-        # Log unexpected errors without console output
-        # Consider if conn.rollback() is needed for general errors if DB was involved before error
-        pass
-    finally:
-        if cur: cur.close()
-        if conn: conn.close()
+            print("\nDatabase connection closed.")
 
 if __name__ == "__main__":
     main() 

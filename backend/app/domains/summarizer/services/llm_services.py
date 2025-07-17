@@ -5,68 +5,73 @@ import traceback
 
 # Third-party imports
 from openai import OpenAI
-from typing import Optional
+from typing import List, Dict, Any, Optional
+import logging
+import openai
 
-# App imports
-from app.domains.summarization.core.config import (
+from app.domains.summarizer.core.config import (
     OPENAI_API_KEY, 
     TOP_LEVEL_SUMMARY_MODEL, 
     MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY
 )
+from app.shared.exceptions import DataSourceException
 
 # Check for OpenAI API key on module import
-if not os.getenv("OPENAI_API_KEY"):
+if not OPENAI_API_KEY:
     # Silent initialization - let calling code handle missing key
     client = None
 else:
     try:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = OpenAI(api_key=OPENAI_API_KEY)
         # Silent success - client initialized
     except Exception as e:
         print(f"Error initializing OpenAI client: {e}", file=sys.stderr)
         client = None
 
-def call_openai_api(prompt_messages, model_name=None, max_tokens_output=None):
-    """Calls the OpenAI Chat Completions API using the globally initialized client.
+
+def call_openai_api(
+    prompt_messages: List[Dict[str, str]],
+    max_tokens_output: int,
+    model_name: str = TOP_LEVEL_SUMMARY_MODEL
+) -> Optional[str]:
+    """
+    Calls the OpenAI ChatCompletion API with specified parameters.
+
     Args:
-        prompt_messages (list): List of message objects for the prompt.
-        model_name (str, optional): The model to use. Defaults to TOP_LEVEL_SUMMARY_MODEL from config.
-        max_tokens_output (int, optional): Max tokens for output. Defaults to MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY.
+        prompt_messages: A list of message dictionaries (e.g., [{"role": "user", "content": "Hello"}]).
+        max_tokens_output: The maximum number of tokens to generate in the response.
+        model_name: The name of the OpenAI model to use.
+
     Returns:
-        str: The content of the message from the OpenAI API response, or None if an error occurs.
+        The content of the API response, or None if the API call fails.
+        
+    Raises:
+        DataSourceException: If the OpenAI API call fails.
     """
     if not client:
-        print("Error: OpenAI client is not initialized. Cannot make API call.", file=sys.stderr)
-        return None
-
-    current_model = model_name or TOP_LEVEL_SUMMARY_MODEL
-    current_max_tokens = max_tokens_output or MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY
+        raise DataSourceException(source="openai", reason="API client is not initialized. Check API key.")
 
     try:
-        
         response = client.chat.completions.create(
-            model=current_model,
+            model=model_name,
             messages=prompt_messages,
-            max_tokens=current_max_tokens,
-            temperature=0.3,  # Lower temperature for more factual/deterministic summaries
+            max_tokens=max_tokens_output,
+            temperature=0.3,
             top_p=1.0,
             frequency_penalty=0.0,
             presence_penalty=0.0
         )
-        
-        if hasattr(response, 'choices') and len(response.choices) > 0:
-            content = response.choices[0].message.content
-            if content and content.strip():
-                return content.strip()
-            else:
-                print(f"Warning: OpenAI API response did not contain expected content. Response: {response}", file=sys.stderr)
-                return None
-    except Exception as e:
-        if "openai" in str(type(e)).lower():
-            print(f"OpenAI API Error (model: {current_model}): {e}", file=sys.stderr)
+        if response.choices and response.choices[0].message and response.choices[0].message.content:
+            return response.choices[0].message.content.strip()
         else:
-            print(f"An unexpected error occurred during OpenAI API call (model: {current_model}): {e}", file=sys.stderr)
-        return None
+            raise DataSourceException(source="openai", reason="API response was empty or malformed.")
+            
+    except openai.APIError as e:
+        logging.error(f"OpenAI API error: {e}")
+        raise DataSourceException(source="openai", reason=str(e)) from e
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during OpenAI API call: {e}")
+        raise DataSourceException(source="openai", reason=f"An unexpected error occurred: {e}") from e
 
 # Example usage (for testing this module directly, if needed):
 # if __name__ == '__main__':

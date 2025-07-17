@@ -7,6 +7,12 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup, NavigableString, Tag
 from collections import OrderedDict
 from datetime import datetime
+import asyncio
+
+# Add the project root to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')))
+
+from app.domains.data_collection.storage.s3_storage_service import get_s3_storage_service
 
 # Environment setup
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -248,38 +254,25 @@ def chunk_section_content(section_text):
             current_narrative_segment = []
             current_subheading_title = None
             
-            line_idx = 0
-            while line_idx < len(lines):
-                line = lines[line_idx]
-                context_lines = [
-                    lines[line_idx-1] if line_idx > 0 else "",
-                    line,
-                    lines[line_idx+1] if line_idx < len(lines)-1 else ""
-                ]
-                
-                potential_subheading = detect_subheading(line, context_lines, 1)
-
-                if potential_subheading:
+            for line_idx, line in enumerate(lines):
+                detected_subheading = detect_subheading(line, lines, line_idx)
+                if detected_subheading:
                     if current_narrative_segment:
-                        segment_text = "\n".join(current_narrative_segment).strip()
-                        if segment_text:
-                            final_chunks.extend(_chunk_segment_by_paragraphs_and_sentences(
-                                segment_text, current_subheading_title, 
-                                MIN_CHARS_PER_CHUNK, TARGET_CHARS_PER_CHUNK, MAX_CHARS_PER_CHUNK
-                            ))
+                        segment_text = "\n".join(current_narrative_segment)
+                        final_chunks.extend(_chunk_segment_by_paragraphs_and_sentences(
+                            segment_text, current_subheading_title, MIN_CHARS_PER_CHUNK, TARGET_CHARS_PER_CHUNK, MAX_CHARS_PER_CHUNK
+                        ))
                         current_narrative_segment = []
-                    current_subheading_title = potential_subheading
+                    current_subheading_title = detected_subheading
                 else:
                     current_narrative_segment.append(line)
-                line_idx += 1
             
             if current_narrative_segment:
-                segment_text = "\n".join(current_narrative_segment).strip()
-                if segment_text:
-                     final_chunks.extend(_chunk_segment_by_paragraphs_and_sentences(
-                        segment_text, current_subheading_title,
-                        MIN_CHARS_PER_CHUNK, TARGET_CHARS_PER_CHUNK, MAX_CHARS_PER_CHUNK
-                    ))
+                segment_text = "\n".join(current_narrative_segment)
+                final_chunks.extend(_chunk_segment_by_paragraphs_and_sentences(
+                    segment_text, current_subheading_title, MIN_CHARS_PER_CHUNK, TARGET_CHARS_PER_CHUNK, MAX_CHARS_PER_CHUNK
+                ))
+                
     return final_chunks
 
 def detect_section(line):
@@ -455,73 +448,35 @@ def preprocess_html(html_content):
     
     return '\n'.join(cleaned_lines)
 
-# Parse the DATABASE_URL
-parsed_url = urlparse(DATABASE_URL.replace("+asyncpg", ""))
+async def save_chunks_to_s3(s3_service, chunks, ticker, accession_number, section_key):
+    """Saves a list of chunks to S3."""
+    tasks = []
+    for i, chunk in enumerate(chunks):
+        task = s3_service.save_chunk_text(
+            chunk_text=chunk['text'],
+            ticker=ticker,
+            accession_number=accession_number,
+            section_key=section_key,
+            chunk_index=i
+        )
+        tasks.append(task)
+    await asyncio.gather(*tasks)
 
-conn_params = {
-    'dbname': parsed_url.path[1:],
-    'user': parsed_url.username,
-    'password': parsed_url.password,
-    'host': parsed_url.hostname,
-    'port': parsed_url.port,
-    'sslmode': 'require'
-}
+def main():
+    print("Starting SEC filing processing...")
 
-conn = None
-cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        print("Database connection successful.")
+    except Exception as e:
+        print(f"Database connection failed: {e}")
+        sys.exit(1)
 
-try:
-    print(f"Connecting to database '{conn_params['dbname']}' at {conn_params['host']}...")
-    conn = psycopg2.connect(**conn_params)
-    cur = conn.cursor()
-    print("Connection successful!")
-
-    # Create sec_filing_sections table
-    table_creation_query_sections = """
-    CREATE TABLE IF NOT EXISTS sec_filing_sections (
-        id SERIAL PRIMARY KEY,
-        filing_accession_number TEXT REFERENCES sec_filings(accession_number) ON DELETE CASCADE,
-        section_key TEXT NOT NULL,
-        original_header TEXT,
-        section_text TEXT,
-        char_count INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_sfs_accession_number ON sec_filing_sections(filing_accession_number);
-    """
-    cur.execute(table_creation_query_sections)
-    print("Executed CREATE TABLE IF NOT EXISTS for sec_filing_sections.")
-    
-    # Create sec_filing_section_chunks table (Step 5 Schema)
-    table_creation_query_chunks = """
-    CREATE TABLE IF NOT EXISTS sec_filing_section_chunks (
-        id SERIAL PRIMARY KEY, -- This is the unique chunk_id
-        filing_accession_number TEXT REFERENCES sec_filings(accession_number) ON DELETE CASCADE,
-        section_db_id INTEGER REFERENCES sec_filing_sections(id) ON DELETE CASCADE,
-        company_name TEXT,
-        ticker TEXT,
-        form_type TEXT,
-        filing_year INTEGER,
-        section_key TEXT,
-        subsection_title TEXT,
-        chunk_order_in_section INTEGER,
-        chunk_text TEXT,
-        char_count INTEGER,
-        is_table BOOLEAN DEFAULT FALSE,
-        is_footnote BOOLEAN DEFAULT FALSE -- Renamed from is_footnote_appendix
-    );
-    CREATE INDEX IF NOT EXISTS idx_sfsc_filing_accession_number ON sec_filing_section_chunks(filing_accession_number);
-    CREATE INDEX IF NOT EXISTS idx_sfsc_section_db_id ON sec_filing_section_chunks(section_db_id);
-    CREATE INDEX IF NOT EXISTS idx_sfsc_ticker_year_section ON sec_filing_section_chunks(ticker, filing_year, section_key);
-    """
-    cur.execute(table_creation_query_chunks)
-    conn.commit()
-    print("'sec_filing_sections' and 'sec_filing_section_chunks' tables checked/created successfully.")
-
-    # sys.exit(0) # Ensure this is removed for full run
+    s3_storage_service = get_s3_storage_service()
 
     for ticker_to_check in TICKERS_TO_PROCESS:
         print(f"\n--- Processing ticker: {ticker_to_check} ---")
-        # Fetch additional metadata from sec_filings (Step 5)
         query = """
         SELECT accession_number, raw_html, ticker, filing_type, filing_date, company_name 
         FROM sec_filings 
@@ -550,92 +505,44 @@ try:
                 sections_data = segment_sec_sections(normalized_text)
                 
                 if not sections_data:
-                    print(f"No sections extracted for {accession_number}. Skipping database ops.")
+                    print(f"No sections extracted for {accession_number}. Skipping S3 storage.")
                     continue
 
-                print(f"\nExtracted {len(sections_data)} sections. Saving to database...")
+                print(f"\nExtracted {len(sections_data)} sections. Saving chunks to S3...")
                 
-                delete_sections_query = "DELETE FROM sec_filing_sections WHERE filing_accession_number = %s;"
-                cur.execute(delete_sections_query, (accession_number,))
-                print(f"Deleted existing sections (and their chunks via cascade) for {accession_number}.")
-
-                saved_sections_count = 0
                 total_chunks_saved_for_filing = 0
-
                 for section_key_val, (original_header, section_text_val) in sections_data.items():
-                    section_char_count = len(section_text_val)
-                    insert_section_query = """
-                    INSERT INTO sec_filing_sections 
-                        (filing_accession_number, section_key, original_header, section_text, char_count)
-                    VALUES (%s, %s, %s, %s, %s) RETURNING id;
-                    """
-                    cur.execute(insert_section_query, (accession_number, section_key_val, original_header, section_text_val, section_char_count))
-                    section_db_id = cur.fetchone()[0]
-                    saved_sections_count += 1
-
-                    chunks = chunk_section_content(section_text_val)
+                    section_key = section_key_val
+                    section_content = section_text_val
                     
-                    if not chunks:
-                        print(f"  No chunks generated for section: {section_key_val}")
+                    if not section_content.strip():
+                        print(f"Section {section_key} is empty. Skipping.")
                         continue
-                    
-                    print(f"  Generated {len(chunks)} chunks for section: '{section_key_val}'. Attempting to save...")
-                    
-                    chunk_order = 0
-                    for chunk_info in chunks:
-                        chunk_order += 1
-                        chunk_text_val = chunk_info['text']
-                        chunk_char_count = len(chunk_text_val)
-                        
-                        if chunk_order == 1:
-                            print(f"    Attempting to insert chunk 1 for section '{section_key_val}':")
-                            print(f"      Accession: {filing_metadata['accession_number']}")
-                            print(f"      Section DB ID: {section_db_id}")
-                            print(f"      Ticker: {filing_metadata['ticker']}")
-                            print(f"      Subsection: {chunk_info.get('subheading', 'N/A')}") # Use .get for safety
-                            print(f"      Is Table: {chunk_info.get('is_table', False)}, Is Footnote: {chunk_info.get('is_footnote', False)}") # Use .get for safety
-                            print(f"      Text snippet: {chunk_text_val[:50]}...")
 
-                        insert_chunk_query = """
-                        INSERT INTO sec_filing_section_chunks 
-                            (filing_accession_number, section_db_id, company_name, ticker, form_type, 
-                             filing_year, section_key, subsection_title, chunk_order_in_section, 
-                             chunk_text, char_count, is_table, is_footnote)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                        """
-                        cur.execute(insert_chunk_query, (
-                            filing_metadata["accession_number"],
-                            section_db_id,
-                            filing_metadata["company_name"],
-                            filing_metadata["ticker"],
-                            filing_metadata["form_type"],
-                            filing_metadata["filing_year"],
-                            section_key_val, 
-                            chunk_info.get('subheading'), 
-                            chunk_order,
-                            chunk_text_val,
-                            chunk_char_count,
-                            chunk_info.get('is_table', False),
-                            chunk_info.get('is_footnote', False)
-                        ))
-                        total_chunks_saved_for_filing +=1
-                    print(f"    Finished iterating {len(chunks)} chunks for section '{section_key_val}'.")
-                
-                conn.commit()
-                print(f"COMMITTED all inserts for filing {accession_number}.")
-                print(f"Successfully saved {saved_sections_count} sections and {total_chunks_saved_for_filing} total chunks for {accession_number}.")
+                    chunks = chunk_section_content(section_content)
+                    
+                    if chunks:
+                        print(f"  - Section '{section_key}': Found {len(chunks)} chunks. Saving to S3...")
+                        try:
+                            asyncio.run(save_chunks_to_s3(
+                                s3_storage_service, chunks, db_ticker, accession_number, section_key
+                            ))
+                            total_chunks_saved_for_filing += len(chunks)
+                        except Exception as e:
+                            print(f"    ERROR: Failed to save chunks for section {section_key} to S3: {e}")
+                    else:
+                        print(f"  - Section '{section_key}': No chunks were generated.")
+
+                print(f"\nFinished processing for {accession_number}. Total chunks saved to S3: {total_chunks_saved_for_filing}")
 
             else:
-                print(f"No HTML content for Accession Number: {accession_number}")
+                print(f"No raw_html content for {accession_number}. Skipping.")
         else:
-            print(f"No records found for ticker {ticker_to_check}.")
+            print(f"No filings found for ticker: {ticker_to_check}")
 
-except Exception as e:
-    print(f"\nError during processing: {e}")
-    import traceback
-    traceback.print_exc()
-    if conn: conn.rollback()
-finally:
-    if cur: cur.close()
-    if conn: conn.close()
-    print("\nDatabase connection closed.") 
+    cur.close()
+    conn.close()
+    print("\nProcessing complete. Database connection closed.")
+
+if __name__ == "__main__":
+    main() 

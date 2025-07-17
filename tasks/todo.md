@@ -33,6 +33,63 @@ The goal of this task is to consolidate the various data ingestion scripts into 
 - **Exclude**: Monthly/quarterly macro (INDPRO, PAYEMS, GDP, UNRATE)
 - **Prediction Horizons**: Next day (1), week (7), month (30)
 
+## Task: Refactor Summarizer Chunk Storage for Cost and Scalability
+
+**Goal:** Replace the costly and inefficient use of RDS (PostgreSQL) for storing text chunks with a more appropriate and cost-effective solution. This is a prerequisite for building a scalable ingestion pipeline.
+
+**Chosen Solution:** Use Amazon S3 for storing chunked text files.
+
+### Plan
+
+1.  **[x] Modify Chunking Service:**
+    *   Update the `SECFilingParsingService` (or related service) that handles chunking.
+    *   Instead of writing chunks to the `sec_filing_sections` database table, it will write each chunk as a text file to S3.
+    *   Establish a clear S3 key structure (e.g., `chunks/{ticker}/{accession_number}/{section_key}/{chunk_index}.txt`).
+
+2.  **[x] Modify Summarization Service:**
+    *   Update the `summarize_sections` service.
+    *   It will now read the required chunks directly from S3 instead of querying the database.
+
+3.  **[x] Decommission Database Table:**
+    *   Create a new Alembic migration to `drop` the `sec_filing_sections` table (and any related chunk tables).
+    *   This will permanently remove the costly table from our database schema.
+
+4.  **[ ] Update Local Development/Testing:**
+    *   Ensure that local development setups can mock or use a local S3-compatible service (like MinIO) so that testing is not dependent on live AWS resources.
+
+## Task: Integrate Kafka for SEC Filings Pipeline
+
+The goal of this task is to refactor the SEC filing ingestion and processing pipeline to use Kafka. This will decouple our services, improve scalability, and increase resilience. We will start by focusing on the flow of raw SEC filings from ingestion to storage and summarization.
+
+### Plan
+
+1.  **[ ] Setup Kafka Infrastructure:**
+    *   Add a Kafka client library (`confluent-kafka`) to `backend/requirements.txt`.
+    *   Create a new module for Kafka-related code, e.g., `backend/app/kafka/`.
+    *   Implement Kafka producer and consumer utility functions/classes within `backend/app/kafka/`.
+    *   Add Kafka configuration (broker URL, topic names) to `backend/app/config.py`.
+
+2.  **[ ] Create Kafka Producer for New Filings:**
+    *   Modify `backend/app/ingestion/ingest_filings.py` to act as a producer.
+    *   Instead of directly calling `store_filing`, it will publish a message to a `sec.filings.new` Kafka topic.
+    *   The message will contain the filing details: `accession_number`, `ticker`, `cik`, `filing_type`, `filing_date`, `form_url`, and `raw_html`.
+
+3.  **[ ] Create Kafka Consumer for Filing Storage:**
+    *   Create a new consumer script, e.g., `backend/app/kafka/consumers/filing_storage_consumer.py`.
+    *   This consumer will subscribe to the `sec.filings.new` topic.
+    *   Upon receiving a message, it will:
+        *   Use `filings_service.store_filing` to save the filing metadata to the database.
+        *   Use `s3_storage_service.save_filing_html` to store the raw HTML in S3.
+
+4.  **[ ] Create Downstream Event for Summarization:**
+    *   After successfully storing the filing, the `filing_storage_consumer` will produce a new message to a `sec.filings.stored` topic.
+    *   This message will contain the `accession_number` and `ticker`, signaling that the filing is ready for processing.
+
+5.  **[ ] Create Kafka Consumer for Summarization:**
+    *   Create a new consumer, e.g., `backend/app/kafka/consumers/summarization_consumer.py`.
+    *   This consumer will subscribe to the `sec.filings.stored` topic.
+    *   It will trigger the existing summarization logic for the filing.
+
 ## Task: Codebase Cleanup and Optimization
 
 ### Plan
