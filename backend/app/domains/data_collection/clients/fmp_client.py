@@ -44,11 +44,9 @@ class FMPClient:
 
 
     async def close(self):
-        """Closes the underlying httpx client."""
         await self._client.aclose()
 
     async def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[List[Dict]]:
-        """Make HTTP request to FMP API with error handling."""
         all_params = {"apikey": self.api_key, **(params or {})}
 
         try:
@@ -59,7 +57,6 @@ class FMPClient:
             
             # Handle API errors
             if isinstance(data, dict) and "Error Message" in data:
-                logger.warning(f"FMP API error for endpoint {endpoint}: {data['Error Message']}")
                 return None
             
             # Handle empty responses
@@ -68,7 +65,6 @@ class FMPClient:
                 
             # Handle unexpected response format
             if not isinstance(data, list):
-                logger.warning(f"Unexpected response format from {endpoint}: {type(data)}")
                 return None
                 
             return data
@@ -100,7 +96,6 @@ class FMPClient:
             return None
 
     async def get_income_statements(self, symbol: str, limit: int = 5, period: str = 'annual') -> Optional[List[IncomeStatementEntry]]:
-        """Fetches income statements for a given stock symbol."""
         endpoint = f"/v3/income-statement/{symbol.upper()}"
         params = {'limit': limit, 'period': period}
         return await self._get_cached_or_fetch(
@@ -112,7 +107,6 @@ class FMPClient:
         )
 
     async def get_balance_sheets(self, symbol: str, limit: int = 5, period: str = 'annual') -> Optional[List[BalanceSheetEntry]]:
-        """Fetches balance sheet statements for a given stock symbol."""
         endpoint = f"/v3/balance-sheet-statement/{symbol.upper()}"
         params = {'limit': limit, 'period': period}
         return await self._get_cached_or_fetch(
@@ -124,7 +118,6 @@ class FMPClient:
         )
 
     async def get_cash_flows(self, symbol: str, limit: int = 5, period: str = 'annual') -> Optional[List[CashFlowEntry]]:
-        """Fetches cash flow statements for a given stock symbol."""
         endpoint = f"/v3/cash-flow-statement/{symbol.upper()}"
         params = {'limit': limit, 'period': period}
         return await self._get_cached_or_fetch(
@@ -164,7 +157,6 @@ class FMPClient:
         period: str = "annual",
         limit: int = 10
     ) -> Optional[List[Dict[str, Any]]]:
-        """Get fundamentals ratios data from FMP API."""
         endpoint = f"/{self.ratios_endpoint}/{ticker.upper()}"
         params = { "period": period, "limit": limit }
         return await self._make_request(endpoint, params=params)
@@ -175,7 +167,6 @@ class FMPClient:
         period: str = "annual",
         limit: int = 10
     ) -> Optional[List[Dict[str, Any]]]:
-        """Get key metrics data from FMP API."""
         endpoint = f"/{self.key_metrics_endpoint}/{ticker.upper()}"
         params = { "period": period, "limit": limit }
         return await self._make_request(endpoint, params=params)
@@ -185,7 +176,6 @@ class FMPClient:
         ratios_data: List[Dict[str, Any]],
         metrics_data: List[Dict[str, Any]]
     ) -> pd.DataFrame:
-        """Merges ratios and key metrics dataframes."""
         
         ratios_df = pd.DataFrame(ratios_data)
         metrics_df = pd.DataFrame(metrics_data)
@@ -214,7 +204,6 @@ class FMPClient:
         df: pd.DataFrame,
         ticker: str
     ) -> List[FMPFundamentalsDataPoint]:
-        """Converts a merged DataFrame into a list of FMPFundamentalsDataPoint objects."""
         
         datapoints = []
         
@@ -277,7 +266,7 @@ class FMPClient:
             try:
                 datapoints.append(FMPFundamentalsDataPoint(**datapoint_data))
             except ValidationError as e:
-                logger.warning(f"Validation error for {ticker} on {row.get('date')}: {e}")
+                pass
 
         return datapoints
 
@@ -287,7 +276,6 @@ class FMPClient:
         period: str = "annual",
         limit: int = 10
     ) -> Optional[List[FMPFundamentalsDataPoint]]:
-        """Fetches, merges, and converts financial ratios and key metrics for a given ticker."""
 
         ratios_data, metrics_data = await asyncio.gather(
             self.get_fundamentals_ratios(ticker, period, limit),
@@ -295,9 +283,6 @@ class FMPClient:
         )
         
         if not ratios_data or not metrics_data:
-            logger.warning(f"Could not fetch complete fundamentals for {ticker}. "
-                           f"Ratios fetched: {'Yes' if ratios_data else 'No'}, "
-                           f"Metrics fetched: {'Yes' if metrics_data else 'No'}")
             return None
 
         merged_df = self._merge_fundamentals_data(ratios_data, metrics_data)
@@ -310,7 +295,6 @@ class FMPClient:
         return datapoints
 
     async def test_connection(self) -> bool:
-        """Tests the connection to the FMP API by fetching data for a known ticker."""
         try:
             ratios = await self.get_fundamentals_ratios("AAPL", limit=1)
             if ratios is not None:

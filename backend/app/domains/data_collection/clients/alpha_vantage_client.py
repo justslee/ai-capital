@@ -35,7 +35,6 @@ class AlphaVantageClient:
         all_params = {"apikey": self.api_key, **(params or {})}
 
         try:
-            logger.debug(f"Making request to Alpha Vantage with params: {params}")
             response = await self._client.get("/query", params=all_params)
             response.raise_for_status()
             

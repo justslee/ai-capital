@@ -38,7 +38,6 @@ class TiingoClient:
             raise ValueError("Tiingo API key is required. Set TIINGO_API_KEY environment variable.")
     
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session."""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
                 headers={
@@ -50,12 +49,10 @@ class TiingoClient:
         return self.session
 
     async def __aenter__(self):
-        """Async context manager entry."""
         self.session = await self._get_session()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
         if self.session:
             await self.session.close()
     
@@ -133,9 +130,6 @@ class TiingoClient:
                 if isinstance(start_date, date):
                     start_date = start_date.isoformat()
                 params["startDate"] = start_date
-                logger.info(f"Fetching historical data for {ticker} from {start_date} to {end_date}")
-            else:
-                logger.info(f"Fetching ALL available historical data for {ticker} up to {end_date}")
             
             session = await self._get_session()
             async with session.get(url, params=params) as response:
@@ -143,7 +137,6 @@ class TiingoClient:
                     data = await response.json()
                     
                     if not data:
-                        logger.warning(f"No data returned for {ticker}")
                         return []
                     
                     price_points = []
@@ -169,17 +162,13 @@ class TiingoClient:
                             )
                             price_points.append(price_point)
                         except Exception as point_error:
-                            logger.warning(f"Error parsing data point for {ticker}: {point_error}")
                             continue
                     
-                    logger.info(f"Successfully fetched {len(price_points)} data points for {ticker}")
                     return price_points
                     
                 elif response.status == 404:
-                    logger.warning(f"Ticker {ticker} not found in Tiingo")
                     return None
                 elif response.status == 429:
-                    logger.warning(f"Rate limit exceeded for {ticker}")
                     return None
                 else:
                     logger.error(f"Error fetching data for {ticker}: {response.status}")
@@ -219,20 +208,15 @@ class TiingoClient:
             return None
 
     async def test_connection(self) -> bool:
-        """
-        Test the connection to the Tiingo API by fetching a known ticker.
-        """
         try:
             # Try to get metadata for a common ticker like AAPL
             metadata = await self.get_ticker_metadata("AAPL")
             if metadata and metadata.ticker == "AAPL":
-                logger.info("✅ Tiingo API connection successful.")
                 return True
             else:
-                logger.error("❌ Tiingo API connection failed: Could not fetch valid data for AAPL.")
                 return False
         except Exception as e:
-            logger.error(f"❌ Tiingo API connection failed with exception: {e}")
+            logger.error(f"Tiingo API connection failed: {e}")
             return False
 
     async def get_supported_tickers(self) -> List[str]:
@@ -304,11 +288,7 @@ class TiingoClient:
             results[ticker] = data
             completed += 1
             
-            if completed % 10 == 0:
-                logger.info(f"Completed {completed}/{len(tickers)} ticker requests")
         
-        logger.info(f"Bulk fetch completed. {len([r for r in results.values() if r])} successful, "
-                   f"{len([r for r in results.values() if not r])} failed")
         
         return results
 

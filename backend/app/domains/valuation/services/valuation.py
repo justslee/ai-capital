@@ -19,7 +19,6 @@ class ValuationService:
     def __init__(self):
         self.data_collection_service = get_data_collection_service()
         self.s3_storage_service = get_s3_storage_service()
-        logger.info("ValuationService initialized.")
 
     async def calculate_dcf(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
@@ -27,7 +26,6 @@ class ValuationService:
         This is a simplified example and would need to be expanded with more
         sophisticated assumptions and calculations for real-world use.
         """
-        logger.info(f"Calculating DCF for {ticker}...")
 
         # 1. Ensure fundamentals are collected
         await self.data_collection_service.collect_fundamentals(ticker)

@@ -29,7 +29,6 @@ class FinancialStatementsService:
         Fetches all available (annual and quarterly) financial statements for a ticker
         and saves them to S3.
         """
-        logger.info(f"Starting financial statement ingestion for {ticker}.")
 
         statement_tasks = []
         periods = ["annual"] # Free tier only supports annual data
@@ -73,7 +72,6 @@ class FinancialStatementsService:
 
         if saving_tasks:
             await asyncio.gather(*saving_tasks)
-            logger.info(f"Successfully saved all financial statements for {ticker}.")
         else:
             logger.warning(f"No financial statement data was saved for {ticker}.")
 

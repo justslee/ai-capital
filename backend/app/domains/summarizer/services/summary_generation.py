@@ -40,7 +40,6 @@ async def generate_and_store_top_level_summary(ticker: str, accession_number: st
     Generates a top-level summary for a given filing by fetching it, parsing it,
     and summarizing its key sections.
     """
-    logger.info(f"Generating top-level summary for {ticker}, accession: {accession_number}")
 
     data_collection_service = get_data_collection_service()
     s3_storage_service = get_s3_storage_service()
@@ -88,7 +87,6 @@ async def generate_and_store_top_level_summary(ticker: str, accession_number: st
             raise Exception("Failed to generate the final top-level summary.")
 
         # 6. Store the final summary (database logic can be re-introduced here if needed)
-        logger.info(f"Successfully generated top-level summary for {ticker} - {accession_number}")
         # For now, just returning the summary without DB storage to simplify the refactoring
         return top_level_summary
 

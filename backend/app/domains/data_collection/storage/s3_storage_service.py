@@ -30,7 +30,6 @@ class S3StorageService:
         self.bucket_name = self.config.s3_bucket
 
     async def _upload_dataframe_to_s3(self, df: pd.DataFrame, s3_key: str):
-        """Uploads DataFrame to S3 as Parquet."""
         try:
             out_buffer = io.BytesIO()
             df.to_parquet(out_buffer, index=True)
@@ -41,13 +40,11 @@ class S3StorageService:
             raise
 
     async def download_multiple_dataframes(self, s3_keys: List[str]) -> List[pd.DataFrame]:
-        """Downloads multiple Parquet files from S3."""
         tasks = [self._download_dataframe_from_s3(key) for key in s3_keys]
         results = await asyncio.gather(*tasks)
         return [df for df in results if df is not None and not df.empty]
 
     async def _download_dataframe_from_s3(self, s3_key: str) -> Optional[pd.DataFrame]:
-        """Downloads Parquet file from S3 as DataFrame."""
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -63,7 +60,6 @@ class S3StorageService:
             raise
 
     async def save_price_data(self, price_data: List[Dict], ticker: str):
-        """Saves price data to S3."""
         if not price_data:
             return
         
@@ -87,7 +83,6 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(combined_df.drop(columns=['year']), s3_key)
         
     async def save_fundamentals_data(self, fundamentals_data: List[Dict], ticker: str):
-        """Saves fundamentals data to S3."""
         if not fundamentals_data:
             return
 
@@ -111,7 +106,6 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(combined_df.drop(columns=['year']), s3_key)
 
     async def save_sentiment_data(self, sentiment_data: List[Sentiment], ticker: str):
-        """Saves sentiment data to S3."""
         if not sentiment_data:
             return
 
@@ -152,14 +146,11 @@ class S3StorageService:
         ticker: str,
         statement_type: str
     ):
-        """Saves financial statement to S3."""
         if not statement_data:
-            logger.warning(f"No {statement_type} data provided for {ticker}.")
             return
 
         new_df = pd.DataFrame(statement_data)
         if 'date' not in new_df.columns:
-            logger.error(f"Missing 'date' column in {statement_type} data for {ticker}.")
             return
 
         new_df['date'] = pd.to_datetime(new_df['date']).dt.date
@@ -181,7 +172,6 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(combined_df.drop(columns=['year']), s3_key)
 
     async def save_financial_statements(self, statements_data: List[Dict], ticker: str):
-        """Saves financial statements to S3."""
         if not statements_data:
             return
         df = pd.DataFrame(statements_data)
@@ -194,7 +184,6 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(group_df.drop(columns=['year', 'quarter']), s3_key)
 
     async def save_macro_data(self, macro_data: pd.DataFrame, series_id: str):
-        """Saves macroeconomic data to S3."""
         if macro_data.empty:
             return
         
@@ -206,7 +195,6 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(year_df.drop(columns=['year']), s3_key)
 
     async def save_filing_html(self, html_content: str, ticker: str, accession_number: str):
-        """Saves SEC filing HTML to S3."""
         s3_key = f"sec_filings/{ticker}/{accession_number}.html"
         try:
             await asyncio.get_event_loop().run_in_executor(
@@ -223,7 +211,6 @@ class S3StorageService:
             raise
 
     async def get_filing_html(self, ticker: str, accession_number: str) -> Optional[str]:
-        """Retrieves SEC filing HTML from S3."""
         s3_key = f"sec_filings/{ticker}/{accession_number}.html"
         try:
             response = await asyncio.get_event_loop().run_in_executor(
@@ -233,14 +220,12 @@ class S3StorageService:
             html_content = response['Body'].read().decode('utf-8')
             return html_content
         except self.s3_client.exceptions.NoSuchKey:
-            logger.warning(f"Filing not found in S3: {s3_key}")
             return None
         except Exception as e:
             logger.error(f"Error retrieving HTML for {accession_number} from S3: {e}")
             return None
 
     async def save_chunk_text(self, chunk_text: str, ticker: str, accession_number: str, section_key: str, chunk_index: int):
-        """Saves a single text chunk to S3."""
         s3_key = f"chunks/{ticker}/{accession_number}/{section_key}/chunk_{chunk_index:04d}.txt"
         try:
             await asyncio.get_event_loop().run_in_executor(
@@ -252,13 +237,11 @@ class S3StorageService:
                     ContentType='text/plain'
                 )
             )
-            logger.info(f"Successfully saved chunk to {s3_key}")
         except Exception as e:
             logger.error(f"Error saving chunk to S3 ({s3_key}): {e}")
             raise
 
     async def list_and_read_chunks(self, ticker: str, accession_number: str, section_key: str) -> List[str]:
-        """Lists and reads all chunks for a given section from S3."""
         s3_prefix = f"chunks/{ticker}/{accession_number}/{section_key}/"
         try:
             paginator = self.s3_client.get_paginator('list_objects_v2')
@@ -282,7 +265,6 @@ class S3StorageService:
             return []
 
     async def _read_s3_file(self, s3_key: str) -> Optional[str]:
-        """Reads a single text file from S3."""
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -290,14 +272,12 @@ class S3StorageService:
             )
             return response['Body'].read().decode('utf-8')
         except self.s3_client.exceptions.NoSuchKey:
-            logger.warning(f"File not found in S3: {s3_key}")
             return None
         except Exception as e:
             logger.error(f"Error reading file from S3 ({s3_key}): {e}")
             return None
 
     async def get_fundamentals(self, ticker: str) -> Optional[pd.DataFrame]:
-        """Retrieves fundamentals data for ticker from S3."""
         s3_prefix = f"fundamentals/fmp/year="
         try:
             paginator = self.s3_client.get_paginator('list_objects_v2')
@@ -313,7 +293,6 @@ class S3StorageService:
                         all_data.append(df)
             
             if not all_data:
-                logger.warning(f"No fundamentals data found for {ticker} in S3.")
                 return None
 
             return pd.concat(all_data, ignore_index=True)
@@ -323,7 +302,6 @@ class S3StorageService:
             return None
 
     async def get_price_data(self, ticker: str) -> Optional[pd.DataFrame]:
-        """Retrieves price data for ticker from S3."""
         s3_prefix = f"market-data/daily_prices/"
         try:
             paginator = self.s3_client.get_paginator('list_objects_v2')
@@ -334,7 +312,6 @@ class S3StorageService:
                         all_ticker_keys.append(obj['Key'])
 
             if not all_ticker_keys:
-                logger.warning(f"No price data found for {ticker} in S3.")
                 return None
             
             return pd.concat(await self.download_multiple_dataframes(all_ticker_keys), ignore_index=True)
@@ -344,7 +321,6 @@ class S3StorageService:
             return None
 
     async def get_latest_price_date(self, ticker: str) -> Optional[date]:
-        """Retrieves latest price date for ticker."""
         s3_prefix = "market-data/daily_prices/"
         try:
             paginator = self.s3_client.get_paginator('list_objects_v2')
@@ -364,7 +340,6 @@ class S3StorageService:
             df = pq.read_table(io.BytesIO(response['Body'].read())).to_pandas()
 
             if 'date' not in df.columns:
-                logger.warning(f"Column 'date' not found in {latest_key}")
                 return None
             
             df['date'] = pd.to_datetime(df['date']).dt.date

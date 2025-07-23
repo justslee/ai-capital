@@ -43,7 +43,6 @@ async def store_filing(
     Returns:
         The created SECFilingDB object if successful, None otherwise (e.g., if duplicate).
     """
-    logger.info(f"Attempting to store filing: {accession_number} for {ticker}")
 
     # 1. Check if filing already exists
     existing_filing = await get_filing_by_accession_number(db, accession_number)
@@ -68,7 +67,6 @@ async def store_filing(
         db.add(new_filing)
         await db.commit()
         await db.refresh(new_filing)
-        logger.info(f"Successfully stored new filing: {accession_number} for {ticker}")
         return new_filing
     except Exception as e:
         await db.rollback()

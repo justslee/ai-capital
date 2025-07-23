@@ -45,7 +45,6 @@ class SECFilingParsingService:
             section_text = self._find_section_text(soup, section_key)
             if section_text:
                 extracted_sections[section_key] = section_text
-                logger.info(f"Successfully extracted section: {section_key}")
             else:
                 logger.warning(f"Could not find or extract section: {section_key}")
 

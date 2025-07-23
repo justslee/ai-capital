@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from statsmodels.tsa.arima.model import ARIMA
-from app.shared.response_utils import success_response, error_response, prediction_response
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.stats.diagnostic import acorr_ljungbox
@@ -140,17 +139,21 @@ class ArimaPredictor:
             aic = self.fitted_model.aic
             
             
-            return success_response({
+            return {
+                'success': True,
                 'model_order': best_order,
                 'aic': aic,
                 'n_observations': len(target_series),
                 'target_column': target_column,
                 'is_stationary': is_stationary
-            })
+            }
             
         except Exception as e:
             logger.error(f"Failed to fit ARIMA model: {e}")
-            return error_response(str(e))
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     def predict(self, n_periods: int = 1) -> Dict[str, Any]:
         """Make predictions using the fitted ARIMA model."""
@@ -158,37 +161,36 @@ class ArimaPredictor:
             raise ValueError("Model must be fitted before making predictions")
         
         try:
-            # Make predictions using get_forecast method
             forecast_result = self.fitted_model.get_forecast(steps=n_periods)
             
             predictions = forecast_result.predicted_mean
             conf_intervals = forecast_result.conf_int()
             
-            # Handle case where forecast returns a single value
             if np.isscalar(predictions):
                 predictions = [predictions]
             else:
                 predictions = predictions.values
             
-            # Format results
-            results = prediction_response(
-                predictions=predictions.tolist() if hasattr(predictions, 'tolist') else predictions,
-                confidence_intervals={
+            results = {
+                'success': True,
+                'predictions': predictions.tolist() if hasattr(predictions, 'tolist') else predictions,
+                'confidence_intervals': {
                     'lower': conf_intervals.iloc[:, 0].tolist(),
                     'upper': conf_intervals.iloc[:, 1].tolist()
                 },
-                model_info={
-                    'n_periods': n_periods,
-                    'target_column': self.target_column
-                }
-            )
+                'n_periods': n_periods,
+                'target_column': self.target_column
+            }
             
             
             return results
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
-            return error_response(str(e))
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     def predict_next_day(self) -> Dict[str, Any]:
         """Predict next day price."""

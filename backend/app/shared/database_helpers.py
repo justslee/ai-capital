@@ -61,10 +61,8 @@ async def safe_db_operation(db: AsyncSession, operation_name: str = "database op
         Database session for operations
     """
     try:
-        logger.debug(f"Starting {operation_name}")
         yield db
         await db.commit()
-        logger.debug(f"Successfully completed {operation_name}")
         
     except Exception as e:
         logger.error(f"Error in {operation_name}: {e}")
