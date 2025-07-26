@@ -15,6 +15,7 @@ import boto3
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from botocore.exceptions import ClientError
 
 from ..config import get_data_collection_config
 from ..models.sentiment import Sentiment
@@ -211,58 +212,39 @@ class S3StorageService:
             raise
 
     async def get_filing_html(self, ticker: str, accession_number: str) -> Optional[str]:
-        s3_key = f"sec_filings/{ticker}/{accession_number}.html"
-        try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
-            )
-            html_content = response['Body'].read().decode('utf-8')
-            return html_content
-        except self.s3_client.exceptions.NoSuchKey:
-            return None
-        except Exception as e:
-            logger.error(f"Error retrieving HTML for {accession_number} from S3: {e}")
-            return None
+        """Retrieves the HTML content of a specific filing."""
+        key = f"filings/{ticker.upper()}/{accession_number}.html"
+        return await self._get_object_content(key)
 
-    async def save_chunk_text(self, chunk_text: str, ticker: str, accession_number: str, section_key: str, chunk_index: int):
-        s3_key = f"chunks/{ticker}/{accession_number}/{section_key}/chunk_{chunk_index:04d}.txt"
+    async def save_text_chunk(self, chunk_text: str, s3_key: str) -> None:
+        """
+        Saves a single text chunk to a specified S3 key.
+
+        :param chunk_text: The text content of the chunk.
+        :param s3_key: The full S3 key to save the chunk to.
+        """
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.s3_client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=s3_key,
-                    Body=chunk_text.encode('utf-8'),
-                    ContentType='text/plain'
-                )
+            await self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=chunk_text.encode('utf-8'),
+                ContentType='text/plain'
             )
-        except Exception as e:
-            logger.error(f"Error saving chunk to S3 ({s3_key}): {e}")
+            logger.info(f"Successfully saved chunk to {s3_key}")
+        except ClientError as e:
+            logger.error(f"Failed to save chunk to {s3_key}: {e}")
             raise
 
-    async def list_and_read_chunks(self, ticker: str, accession_number: str, section_key: str) -> List[str]:
-        s3_prefix = f"chunks/{ticker}/{accession_number}/{section_key}/"
-        try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=s3_prefix)
-            
-            chunk_keys = []
-            for page in pages:
-                for obj in page.get('Contents', []):
-                    chunk_keys.append(obj['Key'])
-            
-            # Sort keys to maintain order, e.g., chunk_0000.txt, chunk_0001.txt
-            chunk_keys.sort()
-
-            tasks = [self._read_s3_file(key) for key in chunk_keys]
-            chunk_contents = await asyncio.gather(*tasks)
-            
-            return [content for content in chunk_contents if content is not None]
-
-        except Exception as e:
-            logger.error(f"Error listing or reading chunks from S3 ({s3_prefix}): {e}")
-            return []
+    async def list_and_read_chunks(self, ticker: str, accession_number: str, section: str) -> List[str]:
+        """Lists and reads all chunk files for a given section from S3."""
+        prefix = f"chunks/{ticker.upper()}/{accession_number}/{section}/"
+        keys = await self.list_objects(prefix)
+        
+        tasks = [self._get_object_content(key) for key in keys]
+        chunk_contents = await asyncio.gather(*tasks)
+        
+        # Filter out any None results from failed reads
+        return [content for content in chunk_contents if content is not None]
 
     async def _read_s3_file(self, s3_key: str) -> Optional[str]:
         try:

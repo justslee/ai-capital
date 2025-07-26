@@ -65,7 +65,7 @@ async def generate_and_store_top_level_summary(ticker: str, accession_number: st
         for section_key, section_text in extracted_sections.items():
             # This is a simplified summarization; in a real app, you'd have chunking logic here
             prompt = f"Summarize the following '{section_key}' section of an SEC filing:\n\n{section_text[:4000]}" # Truncate for now
-            summary = call_openai_api([{"role": "user", "content": prompt}], max_tokens_output=150)
+            summary = await call_openai_api([{"role": "user", "content": prompt}], max_tokens_output=150)
             if summary:
                 section_summaries[section_key] = summary
 
@@ -77,7 +77,7 @@ async def generate_and_store_top_level_summary(ticker: str, accession_number: st
         user_prompt = HEDGE_FUND_USER_PROMPT_TEMPLATE.format(concatenated_section_summaries=concatenated_input)
         prompt_messages = [{"role": "system", "content": HEDGE_FUND_SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}]
         
-        top_level_summary = call_openai_api(
+        top_level_summary = await call_openai_api(
             prompt_messages,
             model_name=TOP_LEVEL_SUMMARY_MODEL,
             max_tokens_output=MAX_TOKENS_HEDGE_FUND_TOP_LEVEL_SUMMARY
@@ -101,9 +101,10 @@ async def generate_and_store_top_level_summary(ticker: str, accession_number: st
 #     # Ensure your .env is loaded and config is correct.
 #     # You might need to delete an existing summary from the DB for this test to generate a new one.
 #     # Example: DELETE FROM sec_filing_top_level_summaries WHERE filing_accession_number = '0000320193-24-000123';
+#     test_ticker = "AAPL"
 #     test_accession_number = "0000320193-24-000123" 
 #     try:
-#         summary = generate_and_store_top_level_summary(test_accession_number)
+#         summary = asyncio.run(generate_and_store_top_level_summary(test_ticker, test_accession_number))
 #         if summary:
 #             print("\n--- TEST SUMMARY ---")
 #             print(summary)
