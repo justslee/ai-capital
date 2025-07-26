@@ -235,6 +235,26 @@ class S3StorageService:
             logger.error(f"Failed to save chunk to {s3_key}: {e}")
             raise
 
+    async def save_summary_document(self, document_content: str, s3_key: str) -> None:
+        """
+        Saves a final summary document to a specified S3 key.
+        Assumes content is Markdown or HTML.
+
+        :param document_content: The content of the summary document.
+        :param s3_key: The full S3 key to save the document to.
+        """
+        try:
+            await self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=document_content.encode('utf-8'),
+                ContentType='text/markdown' # Or 'text/html'
+            )
+            logger.info(f"Successfully saved summary document to {s3_key}")
+        except ClientError as e:
+            logger.error(f"Failed to save summary document to {s3_key}: {e}")
+            raise
+
     async def list_and_read_chunks(self, ticker: str, accession_number: str, section: str) -> List[str]:
         """Lists and reads all chunk files for a given section from S3."""
         prefix = f"chunks/{ticker.upper()}/{accession_number}/{section}/"
@@ -245,6 +265,43 @@ class S3StorageService:
         
         # Filter out any None results from failed reads
         return [content for content in chunk_contents if content is not None]
+
+    async def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
+        """
+        Generate a presigned URL to share an S3 object.
+
+        :param s3_key: The key of the object in S3.
+        :param expiration: Time in seconds for the presigned URL to remain valid.
+        :return: The presigned URL as a string. If error, returns None.
+        """
+        try:
+            response = await self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': s3_key},
+                ExpiresIn=expiration
+            )
+            return response
+        except ClientError as e:
+            logger.error(f"Failed to generate presigned URL for {s3_key}: {e}")
+            return None
+
+    async def object_exists(self, key: str) -> bool:
+        """
+        Checks if an object exists in S3.
+
+        :param key: The full S3 key of the object.
+        :return: True if the object exists, False otherwise.
+        """
+        try:
+            await self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
+            return True
+        except self.s3_client.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return False
+            raise
+        except Exception as e:
+            logger.error(f"Error checking object existence for {key}: {e}")
+            return False
 
     async def _read_s3_file(self, s3_key: str) -> Optional[str]:
         try:
