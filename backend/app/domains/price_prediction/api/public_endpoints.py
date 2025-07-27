@@ -8,13 +8,13 @@ Only includes endpoints that external clients should access.
 from typing import Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Path, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import get_db
+from fastapi import APIRouter, Depends, Path, Query
+from sqlalchemy.orm import Session
 
-# Shared imports
-from ...shared.response_models import APIResponse
-from ...shared.exceptions import handle_domain_exception
+from app.api import deps
+from app.shared.response_models import APIResponse
+from app.shared.exceptions import handle_domain_exception
+from ..price_prediction_service import PricePredictionService
 
 router = APIRouter()
 
@@ -38,7 +38,7 @@ async def predict_stock_price(
         description="Prediction model type",
         regex="^(lstm|linear_regression|ensemble)$"
     ),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(deps.get_db)
 ):
     """
     Predict future stock price for a given ticker.
@@ -59,7 +59,7 @@ async def predict_stock_price(
         - Feature importance insights
     """
     try:
-        from ..services.price_prediction_service import price_prediction_service
+        price_prediction_service = PricePredictionService()
         
         # This will raise PricePredictionNotImplementedException
         result = await price_prediction_service.predict_price(

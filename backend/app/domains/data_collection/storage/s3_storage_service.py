@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from botocore.exceptions import ClientError
 
-from ..config import get_data_collection_config
+from app.domains.data_collection.config import get_data_collection_config
 from ..models.sentiment import Sentiment
 
 logger = logging.getLogger(__name__)
@@ -27,15 +27,23 @@ class S3StorageService:
 
     def __init__(self):
         self.config = get_data_collection_config()
-        self.s3_client = boto3.client("s3")
-        self.bucket_name = self.config.s3_bucket
+        self.bucket_name = self.config.s3_bucket_name or self.config.s3_bucket
+        if not self.bucket_name:
+            raise ValueError("S3 bucket name not configured. Set S3_BUCKET in .env file")
+    
+    def _get_s3_client(self):
+        """Create a fresh S3 client to avoid token expiration issues."""
+        return boto3.client("s3")
 
     async def _upload_dataframe_to_s3(self, df: pd.DataFrame, s3_key: str):
         try:
             out_buffer = io.BytesIO()
             df.to_parquet(out_buffer, index=True)
             out_buffer.seek(0)
-            await self.s3_client.put_object(Bucket=self.bucket_name, Key=s3_key, Body=out_buffer)
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._get_s3_client().put_object(Bucket=self.bucket_name, Key=s3_key, Body=out_buffer)
+            )
         except Exception as e:
             logger.error(f"Error uploading to {s3_key}: {e}")
             raise
@@ -49,12 +57,12 @@ class S3StorageService:
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
+                lambda: self._get_s3_client().get_object(Bucket=self.bucket_name, Key=s3_key)
             )
             buffer = io.BytesIO(response['Body'].read())
             table = pq.read_table(buffer)
             return table.to_pandas()
-        except self.s3_client.exceptions.NoSuchKey:
+        except ClientError:
             return None
         except Exception as e:
             logger.error(f"Error downloading or parsing {s3_key}: {e}")
@@ -196,11 +204,11 @@ class S3StorageService:
             await self._upload_dataframe_to_s3(year_df.drop(columns=['year']), s3_key)
 
     async def save_filing_html(self, html_content: str, ticker: str, accession_number: str):
-        s3_key = f"sec_filings/{ticker}/{accession_number}.html"
+        s3_key = f"sec_filings/{ticker.upper()}/{accession_number}.html"
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.s3_client.put_object(
+                lambda: self._get_s3_client().put_object(
                     Bucket=self.bucket_name,
                     Key=s3_key,
                     Body=html_content.encode('utf-8'),
@@ -213,7 +221,7 @@ class S3StorageService:
 
     async def get_filing_html(self, ticker: str, accession_number: str) -> Optional[str]:
         """Retrieves the HTML content of a specific filing."""
-        key = f"filings/{ticker.upper()}/{accession_number}.html"
+        key = f"sec_filings/{ticker.upper()}/{accession_number}.html"
         return await self._get_object_content(key)
 
     async def save_text_chunk(self, chunk_text: str, s3_key: str) -> None:
@@ -224,31 +232,38 @@ class S3StorageService:
         :param s3_key: The full S3 key to save the chunk to.
         """
         try:
-            await self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                Body=chunk_text.encode('utf-8'),
-                ContentType='text/plain'
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._get_s3_client().put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=chunk_text.encode('utf-8'),
+                    ContentType='text/plain'
+                )
             )
             logger.info(f"Successfully saved chunk to {s3_key}")
         except ClientError as e:
             logger.error(f"Failed to save chunk to {s3_key}: {e}")
             raise
 
-    async def save_summary_document(self, document_content: str, s3_key: str) -> None:
+    async def save_summary_document(self, document_content: str, file_id: str) -> None:
         """
         Saves a final summary document to a specified S3 key.
         Assumes content is Markdown or HTML.
 
         :param document_content: The content of the summary document.
-        :param s3_key: The full S3 key to save the document to.
+        :param file_id: The unique ID for the summary file.
         """
+        s3_key = f"summaries/{file_id}.md"
         try:
-            await self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=s3_key,
-                Body=document_content.encode('utf-8'),
-                ContentType='text/markdown' # Or 'text/html'
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._get_s3_client().put_object(
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    Body=document_content.encode('utf-8'),
+                    ContentType='text/markdown' # Or 'text/html'
+                )
             )
             logger.info(f"Successfully saved summary document to {s3_key}")
         except ClientError as e:
@@ -266,24 +281,42 @@ class S3StorageService:
         # Filter out any None results from failed reads
         return [content for content in chunk_contents if content is not None]
 
-    async def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
+    async def _get_object_content(self, s3_key: str) -> Optional[str]:
         """
-        Generate a presigned URL to share an S3 object.
-
-        :param s3_key: The key of the object in S3.
-        :param expiration: Time in seconds for the presigned URL to remain valid.
-        :return: The presigned URL as a string. If error, returns None.
+        Get the text content of an S3 object.
+        
+        :param s3_key: The S3 key of the object
+        :return: The content as a string, or None if not found
         """
         try:
-            response = await self.s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': s3_key},
-                ExpiresIn=expiration
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._get_s3_client().get_object(Bucket=self.bucket_name, Key=s3_key)
             )
-            return response
-        except ClientError as e:
-            logger.error(f"Failed to generate presigned URL for {s3_key}: {e}")
+            return response['Body'].read().decode('utf-8')
+        except ClientError:
+            logger.warning(f"Object not found: {s3_key}")
             return None
+        except Exception as e:
+            logger.error(f"Error reading object {s3_key}: {e}")
+            return None
+
+    async def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
+        """
+        Generates a direct public URL for an S3 object.
+
+        :param s3_key: The key of the object in S3.
+        :param expiration: (Ignored for public URLs) Time in seconds for the presigned URL to remain valid.
+        :return: The direct public URL as a string. If bucket name is not configured, returns None.
+        """
+        if not self.bucket_name:
+            logger.error("S3 bucket name is not configured. Cannot generate public URL.")
+            return None
+        
+        # Construct the public URL
+        public_url = f"https://{self.bucket_name}.s3.amazonaws.com/{s3_key}"
+        logger.info(f"Generated public S3 URL: {public_url}")
+        return public_url
 
     async def object_exists(self, key: str) -> bool:
         """
@@ -293,9 +326,9 @@ class S3StorageService:
         :return: True if the object exists, False otherwise.
         """
         try:
-            await self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
+            await self._get_s3_client().head_object(Bucket=self.bucket_name, Key=key)
             return True
-        except self.s3_client.exceptions.ClientError as e:
+        except ClientError as e:
             if e.response['Error']['Code'] == '404':
                 return False
             raise
@@ -307,10 +340,10 @@ class S3StorageService:
         try:
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
+                lambda: self._get_s3_client().get_object(Bucket=self.bucket_name, Key=s3_key)
             )
             return response['Body'].read().decode('utf-8')
-        except self.s3_client.exceptions.NoSuchKey:
+        except ClientError:
             return None
         except Exception as e:
             logger.error(f"Error reading file from S3 ({s3_key}): {e}")
@@ -319,7 +352,7 @@ class S3StorageService:
     async def get_fundamentals(self, ticker: str) -> Optional[pd.DataFrame]:
         s3_prefix = f"fundamentals/fmp/year="
         try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
+            paginator = self._get_s3_client().get_paginator('list_objects_v2')
             pages = paginator.paginate(Bucket=self.bucket_name, Prefix=s3_prefix)
             
             all_data = []
@@ -327,7 +360,7 @@ class S3StorageService:
                 for obj in page.get('Contents', []):
                     key = obj['Key']
                     if f"fundamentals_{ticker}" in key:
-                        response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+                        response = self._get_s3_client().get_object(Bucket=self.bucket_name, Key=key)
                         df = pq.read_table(io.BytesIO(response['Body'].read())).to_pandas()
                         all_data.append(df)
             
@@ -343,7 +376,7 @@ class S3StorageService:
     async def get_price_data(self, ticker: str) -> Optional[pd.DataFrame]:
         s3_prefix = f"market-data/daily_prices/"
         try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
+            paginator = self._get_s3_client().get_paginator('list_objects_v2')
             all_ticker_keys = []
             for page in paginator.paginate(Bucket=self.bucket_name, Prefix=s3_prefix):
                 for obj in page.get('Contents', []):
@@ -362,7 +395,7 @@ class S3StorageService:
     async def get_latest_price_date(self, ticker: str) -> Optional[date]:
         s3_prefix = "market-data/daily_prices/"
         try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
+            paginator = self._get_s3_client().get_paginator('list_objects_v2')
             
             all_ticker_keys = []
             for page in paginator.paginate(Bucket=self.bucket_name, Prefix=s3_prefix):
@@ -375,7 +408,7 @@ class S3StorageService:
 
             latest_key = max(all_ticker_keys)
 
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=latest_key)
+            response = self._get_s3_client().get_object(Bucket=self.bucket_name, Key=latest_key)
             df = pq.read_table(io.BytesIO(response['Body'].read())).to_pandas()
 
             if 'date' not in df.columns:

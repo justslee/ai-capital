@@ -6,52 +6,38 @@ Only includes endpoints that external clients should access.
 """
 
 from fastapi import APIRouter, Depends, Path
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import get_db
+from sqlalchemy.orm import Session
 
-# Shared imports
-from ...shared.response_models import ValuationResponse
-from ...shared.exceptions import (
+from app.api import deps
+from app.shared.response_models import ValuationResponse
+from app.shared.exceptions import (
     FinancialDataNotFoundException, ValuationCalculationException
 )
+from ..services.valuation import get_valuation_service, ValuationService
 
 router = APIRouter()
 
-@router.get("/valuation/dcf/{ticker}", response_model=ValuationResponse)
+
+@router.get("/{ticker}", response_model=ValuationResponse)
 async def get_dcf_valuation(
     ticker: str = Path(
-        ..., 
-        title="Stock Ticker", 
-        description="The ticker symbol of the company (e.g., AAPL)", 
-        min_length=1, 
+        ...,
+        description="The stock ticker symbol (e.g., AAPL)",
+        min_length=1,
         max_length=10
     ),
-    db: AsyncSession = Depends(get_db)
+    valuation_service: ValuationService = Depends(get_valuation_service)
 ):
     """
-    Calculate DCF (Discounted Cash Flow) valuation for a company.
-    
-    **Public API Endpoint**
-    
-    This endpoint calculates the intrinsic value of a company using DCF analysis
-    based on historical financial data. This is the main valuation endpoint
-    for external clients.
-    
-    Returns:
-        - Intrinsic value per share
-        - Total intrinsic value
-        - Shares outstanding
-        - Calculation methodology summary
+    Performs a Discounted Cash Flow (DCF) valuation for a given stock ticker.
     """
     try:
-        from app.domains.valuation.services.valuation import calculate_dcf_valuation
-        
         ticker_upper = ticker.upper()
         
-        valuation_result = await calculate_dcf_valuation(ticker_upper, db)
+        valuation_result = await valuation_service.calculate_dcf(ticker_upper)
         
         if not valuation_result:
-            raise FinancialDataNotFoundException(ticker_upper, "DCF valuation data")
+            raise FinancialDataNotFoundException(f"Could not calculate DCF for {ticker_upper}. Financial data may be missing or insufficient.")
         
         # Return standardized response for public API
         return ValuationResponse(

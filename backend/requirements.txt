@@ -37,3 +37,9 @@ asyncpg
 statsmodels>=0.14.0
 
 langchain
+
+# Vector DB and Embeddings
+sentence-transformers
+pinecone
+anthropic
+openai

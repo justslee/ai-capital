@@ -26,8 +26,6 @@ class BaseDomainConfig(BaseSettings):
     Provides common configuration patterns and environment variable handling.
     """
     
-    # Common database configuration
-    database_url: str = Field(env="DATABASE_URL")
     
     # Common cache configuration
     redis_host: str = Field(default="localhost", env="REDIS_HOST")
@@ -53,8 +51,6 @@ class BaseDomainConfig(BaseSettings):
         """
         results = {}
         
-        # Check database URL
-        results["database_url"] = bool(self.database_url)
         
         return results
     
@@ -66,7 +62,6 @@ class BaseDomainConfig(BaseSettings):
             Dictionary of connection parameters
         """
         return {
-            "database_url": self.database_url,
             "redis_host": self.redis_host,
             "redis_port": self.redis_port,
         }
@@ -83,7 +78,6 @@ def get_domain_config(domain_name: str) -> Dict[str, Any]:
         Dictionary of configuration values
     """
     base_config = {
-        "database_url": settings.database_url,
         "redis_host": getattr(settings, 'redis_host', 'localhost'),
         "redis_port": getattr(settings, 'redis_port', 6379),
         "cache_ttl_seconds": getattr(settings, 'cache_ttl_seconds', 3600),

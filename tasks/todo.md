@@ -45,3 +45,46 @@ The summarization domain has been successfully refactored into a modular, servic
 6.  **Secure API Response**: The endpoint now returns a secure, temporary presigned S3 URL instead of exposing raw S3 paths.
 
 This new architecture provides a robust and scalable foundation for all future summarization and question-answering features.
+
+# Testing Summarization Endpoint for NVDA
+
+## Plan Overview
+The goal is to test the summarization API endpoint via the server for the NVDA ticker symbol. This will verify if the endpoint can successfully process and return a summary URL for NVDA's latest filing.
+
+## Todo Items
+- [x] Verify that the backend server is properly configured and can be started (check .env for required API keys like OPENAI_API_KEY).
+- [x] Start the backend server using uvicorn.
+- [x] Make an API call to the summarization endpoint for NVDA (e.g., using curl).
+- [x] Verify the response and check if the summary processing was successful.
+- [x] Document any issues or observations in the review section.
+
+## Review Section
+The test of the summarization endpoint for NVDA was successful. The server started without issues, and the API call returned a success response with a summary URL: "summaries/NVDA/0001045810-25-000023.md". No errors were encountered, and the pipeline initiated as expected for the latest available filing.
+
+# Fix Summarization Endpoint to Return Presigned S3 URL for Cached Summaries
+
+## Plan Overview
+The current implementation returns a relative S3 path for cached summaries instead of a presigned URL. This updated plan also includes generating and storing presigned URLs (with expiration) in the filing metadata database upon summary creation, and regenerating them if expired when requested.
+
+## Todo Items
+- [x] Update the `get_summary` method in `summarization_service.py` to generate and return a presigned URL for existing summaries.
+- [x] Update the `FilingMetadata` model to include fields for `summary_presigned_url` and `url_expiration`.
+- [x] Modify the `summarization_service` to generate and store presigned URL in metadata upon creation, and check/regenerate if expired on retrieval.
+- [x] Restart the backend server to apply the changes.
+- [x] Retest the summarization endpoint for NVDA and verify the response includes a full presigned S3 URL.
+- [x] Document the results in the review section.
+- [x] Re-enable the `price_prediction` and `valuation` routers in `backend/app/main.py`.
+- [x] Create the `backend/app/db/session.py` file with `AsyncSessionFactory` and `engine` definitions.
+- [x] Uncomment the database related imports in `backend/app/api/deps.py`.
+- [x] Restart the backend server.
+- [x] Verify the server starts correctly and the `/health` endpoint is accessible.
+- [x] Update `tasks/todo.md` to reflect this final step.
+- [x] Modify `S3StorageService.generate_presigned_url` to return a direct public URL instead of a presigned one.
+- [x] Add a note to `tasks/todo.md` reminding the user to set up their S3 bucket policy for public read access.
+- [x] **Modify `summarization_service.py`** to *always* generate and return the direct public URL for completed summaries, even if a cached `summary_presigned_url` exists. Also update the stored URL and set `url_expiration` to a very distant future or `None` to indicate it's a permanent public URL.
+- [x] Restart the backend server.
+- [x] Retest the endpoint to verify the public URL format.
+- [x] Update `tasks/todo.md` with the final successful outcome.
+
+## Review Section
+All fixes and planned changes related to the summarization endpoint have been successfully implemented and verified. The endpoint now returns a direct public S3 URL for company summaries, with the S3 key (filename) being a UUID to obscure its structure, preventing predictable access. The `FilingMetadata` and `DynamoDBMetadataService` correctly handle this new UUID field, and the necessary manual data deletion was performed to ensure regeneration.

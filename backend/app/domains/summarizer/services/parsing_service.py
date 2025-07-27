@@ -105,6 +105,7 @@ class DocumentParsingService:
     async def get_filing_sections(self, ticker: str, accession_number: str) -> Dict[str, str]:
         """
         Fetches a filing's HTML, parses it, and splits it into sections.
+        Downloads from SEC if not in S3.
 
         :param ticker: The stock ticker.
         :param accession_number: The filing's accession number.
@@ -114,11 +115,79 @@ class DocumentParsingService:
         html_content = await self.s3_service.get_filing_html(ticker, accession_number)
         
         if not html_content:
-            raise ValueError(f"Could not retrieve HTML for {accession_number} from S3.")
+            logger.info(f"HTML not found in S3, downloading from SEC for {accession_number}")
+            html_content = await self._download_filing_from_sec(ticker, accession_number)
+            
+            if not html_content:
+                raise ValueError(f"Could not retrieve HTML for {accession_number} from SEC or S3.")
+            
+            # Store in S3 for future use
+            logger.info(f"Storing downloaded HTML in S3 for {accession_number}")
+            await self.s3_service.save_filing_html(html_content, ticker, accession_number)
 
         logger.info("Parsing HTML and splitting into sections.")
         text = self._extract_text_from_html(html_content)
         return self._split_text_into_sections(text)
+    
+    async def _download_filing_from_sec(self, ticker: str, accession_number: str) -> Optional[str]:
+        """
+        Downloads filing HTML directly from SEC Edgar.
+        Uses common filing naming patterns since we don't always have the exact primary doc name.
+        """
+        try:
+            from ...data_collection.clients.sec_client import get_sec_client
+            from ....sec_utils import ticker_to_cik
+            
+            sec_client = get_sec_client()
+            cik = ticker_to_cik(ticker)
+            
+            if not cik:
+                logger.error(f"Could not find CIK for ticker {ticker}")
+                return None
+            
+            logger.info(f"Attempting to download filing {accession_number} for {ticker}")
+            
+            # Try multiple common primary document naming patterns for 10-K/10-Q filings
+            # For accession like 0001045810-24-000029, extract year and try common patterns
+            accession_parts = accession_number.split('-')
+            year_short = accession_parts[1]
+            seq = accession_parts[2]
+            
+            # Examples: d10k.htm, form10k.htm
+            primary_doc_patterns = [
+                f"d{form_type.replace('-', '').lower()}.htm",
+                f"form{form_type.lower()}.htm"
+            ]
+            
+            # More generic patterns
+            primary_doc_patterns.extend([
+                f"{ticker.lower()}-{filing_date.strftime('%Y%m%d')}.htm",
+                f"{accession_number}.txt", # Fallback to full text file
+            ])
+
+            # Run the synchronous SEC client method in an executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            for primary_doc in primary_doc_patterns:
+                try:
+                    def download_wrapper():
+                        return sec_client.download_filing_html(cik, accession_number, primary_doc)
+                    
+                    html_content = await loop.run_in_executor(None, download_wrapper)
+                    
+                    if html_content and len(html_content) > 1000: # Basic validation
+                        logger.info(f"Successfully downloaded HTML for {accession_number} using pattern: {primary_doc}")
+                        return html_content
+                except Exception:
+                    continue # Try the next pattern
+            
+            logger.error(f"Failed to download filing {accession_number} with any of the common patterns.")
+            return None
+
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in _download_filing_from_sec: {e}")
+            return None
 
     def _extract_text_from_html(self, html_content: str) -> str:
         """

@@ -341,7 +341,7 @@ class DynamoDBMetadataService:
     """
     Service to manage filing and summarization metadata in DynamoDB.
     """
-    def __init__(self, table_name: str = "ai_capital_filing_metadata", region_name: str = "us-east-1"):
+    def __init__(self, table_name: str = "filing_metadata", region_name: str = "us-east-1"):
         """
         Initializes the DynamoDB service.
 
@@ -357,32 +357,45 @@ class DynamoDBMetadataService:
         Creates the DynamoDB table if it does not already exist.
         This method is idempotent.
         """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
         try:
-            self.dynamodb.meta.client.describe_table(TableName=self.table_name)
+            # Run synchronous describe_table in executor
+            await loop.run_in_executor(
+                None, 
+                lambda: self.dynamodb.meta.client.describe_table(TableName=self.table_name)
+            )
             logger.info(f"Table '{self.table_name}' already exists.")
         except ClientError as e:
             if e.response['Error']['Code'] == 'ResourceNotFoundException':
                 logger.info(f"Table '{self.table_name}' does not exist. Creating now...")
-                self.dynamodb.create_table(
-                    TableName=self.table_name,
-                    KeySchema=[
-                        {
-                            'AttributeName': 'accession_number',
-                            'KeyType': 'HASH'  # Partition key
+                
+                # Run synchronous table creation in executor
+                def create_table():
+                    table = self.dynamodb.create_table(
+                        TableName=self.table_name,
+                        KeySchema=[
+                            {
+                                'AttributeName': 'accession_number',
+                                'KeyType': 'HASH'  # Partition key
+                            }
+                        ],
+                        AttributeDefinitions=[
+                            {
+                                'AttributeName': 'accession_number',
+                                'AttributeType': 'S'
+                            }
+                        ],
+                        ProvisionedThroughput={
+                            'ReadCapacityUnits': 5,
+                            'WriteCapacityUnits': 5
                         }
-                    ],
-                    AttributeDefinitions=[
-                        {
-                            'AttributeName': 'accession_number',
-                            'AttributeType': 'S'
-                        }
-                    ],
-                    ProvisionedThroughput={
-                        'ReadCapacityUnits': 5,
-                        'WriteCapacityUnits': 5
-                    }
-                )
-                self.table.wait_until_exists()
+                    )
+                    self.table.wait_until_exists()
+                    return table
+                
+                await loop.run_in_executor(None, create_table)
                 logger.info(f"Table '{self.table_name}' created successfully.")
             else:
                 logger.error(f"An unexpected error occurred: {e}")
@@ -396,16 +409,26 @@ class DynamoDBMetadataService:
         :return: A FilingMetadata object or None if not found.
         """
         try:
-            response = self.table.get_item(Key={'accession_number': accession_number})
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            response = await loop.run_in_executor(
+                None, 
+                lambda: self.table.get_item(Key={'accession_number': accession_number})
+            )
             item = response.get('Item')
             if item:
                 logger.info(f"Found metadata for {accession_number} in DynamoDB.")
-                # Convert dates from string back to datetime if necessary
-                item['filing_date'] = datetime.fromisoformat(item['filing_date'])
-                item['created_at'] = datetime.fromisoformat(item['created_at'])
-                item['updated_at'] = datetime.fromisoformat(item['updated_at'])
+                # Convert dates from string back to datetime with UTC timezone
+                item['filing_date'] = datetime.fromisoformat(item['filing_date']).replace(tzinfo=timezone.utc)
+                item['created_at'] = datetime.fromisoformat(item['created_at']).replace(tzinfo=timezone.utc)
+                item['updated_at'] = datetime.fromisoformat(item['updated_at']).replace(tzinfo=timezone.utc)
+                if 'url_expiration' in item and item['url_expiration']:
+                    item['url_expiration'] = datetime.fromisoformat(item['url_expiration']).replace(tzinfo=timezone.utc)
+                if 'summary_file_id' in item and item['summary_file_id']:
+                    item['summary_file_id'] = str(item['summary_file_id'])
                 for chunk in item.get('chunks', []):
-                    chunk['created_at'] = datetime.fromisoformat(chunk['created_at'])
+                    chunk['created_at'] = datetime.fromisoformat(chunk['created_at']).replace(tzinfo=timezone.utc)
                 return FilingMetadata(**item)
             return None
         except ClientError as e:
@@ -423,11 +446,17 @@ class DynamoDBMetadataService:
             item = metadata.model_dump()
             item['filing_date'] = metadata.filing_date.isoformat()
             item['created_at'] = metadata.created_at.isoformat()
-            item['updated_at'] = datetime.utcnow().isoformat() # Always update timestamp
+            item['updated_at'] = datetime.now(timezone.utc).isoformat() # Always update timestamp
+            if metadata.url_expiration:
+                item['url_expiration'] = metadata.url_expiration.isoformat()
+            if metadata.summary_file_id:
+                item['summary_file_id'] = metadata.summary_file_id
             for chunk in item.get('chunks', []):
                 chunk['created_at'] = chunk['created_at'].isoformat()
 
-            self.table.put_item(Item=item)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: self.table.put_item(Item=item))
             logger.info(f"Successfully saved metadata for {metadata.accession_number}.")
         except ClientError as e:
             logger.error(f"Error saving metadata for {metadata.accession_number}: {e}")

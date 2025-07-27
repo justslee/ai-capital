@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 
 # Shared imports
-from ...shared.response_models import ValuationResponse
-from ...shared.exceptions import (
+from app.shared.response_models import ValuationResponse
+from app.shared.exceptions import (
     FinancialDataNotFoundException, handle_domain_exception
 )
 

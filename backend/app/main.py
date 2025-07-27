@@ -1,5 +1,19 @@
 import logging
+import os
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi import APIRouter
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in project root
+project_root = Path(__file__).resolve().parents[2]  # Go up to ai-capital/
+env_path = project_root / '.env'
+if env_path.exists():
+    # Force override existing environment variables
+    load_dotenv(dotenv_path=env_path, override=True)
+    print(f"Loaded .env from {env_path} with override=True")
+else:
+    print(f"Warning: .env file not found at {env_path}")
 
 # Configure logging to show INFO level logs
 logging.basicConfig(
@@ -10,15 +24,11 @@ logging.basicConfig(
 # Set specific loggers to INFO level
 logging.getLogger("app.domains.data_collection.tiingo_client").setLevel(logging.INFO)
 
-# Import public API routers (client-facing)
-from app.domains.summarizer.api.summary_endpoint import router as summarization_router
-from app.domains.valuation.api.public_endpoints import router as public_valuation_router
-from app.domains.modeling.api.public_endpoints import router as public_modeling_router
-
-# Import internal API routers (admin/operations)
-from app.domains.valuation.api.internal_endpoints import router as internal_valuation_router
-from app.domains.modeling.api.modeling_endpoints import router as modeling_router
-from app.domains.modeling.api.duckdb_endpoints import router as duckdb_router
+# Import API routers from each domain
+from .domains.summarizer.api.summary_endpoint import router as summarization_router
+from .domains.price_prediction.api.public_endpoints import router as public_price_prediction_router
+from .domains.valuation.api.public_endpoints import router as public_valuation_router
+from .domains.valuation.api.internal_endpoints import router as internal_valuation_router
 
 app = FastAPI(
     title="AI Capital API",
@@ -26,15 +36,18 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# Include public API routers (client-facing)
-app.include_router(summarization_router, prefix="/api/v1", tags=["public-api", "summarization"])
-app.include_router(public_valuation_router, prefix="/api/v1", tags=["public-api", "valuation"])
-app.include_router(public_modeling_router, prefix="/api/v1", tags=["public-api", "prediction"])
+# Create a main API router to group all versioned endpoints
+api_router = APIRouter()
 
-# Include internal API routers (admin/operations only)
-app.include_router(internal_valuation_router, prefix="/internal", tags=["internal-api", "valuation"])
-app.include_router(modeling_router, prefix="/internal", tags=["internal-api", "modeling"])
-app.include_router(duckdb_router, prefix="/internal", tags=["internal-api", "storage"])
+# Routers for each domain
+api_router.include_router(public_valuation_router, prefix="/valuation", tags=["Valuation"])
+api_router.include_router(public_price_prediction_router, prefix="/predict", tags=["Price Prediction"])
+api_router.include_router(summarization_router, prefix="/summarizer", tags=["Summarization"])
+api_router.include_router(internal_valuation_router, prefix="/internal/valuation", tags=["Valuation (Internal)"])
+
+
+app.include_router(api_router, prefix="/api/v1")
+
 
 @app.get("/")
 async def read_root():
@@ -73,7 +86,6 @@ async def read_root():
             "full_api": "/docs - Complete API documentation (includes internal endpoints)"
         }
     }
-
 # You can include your API routers here later
 # Example: from .api.endpoints import items
 # app.include_router(items.router, prefix="/items", tags=["items"]) 

@@ -8,6 +8,7 @@ class ChunkMetadata(BaseModel):
     """
     chunk_id: str = Field(..., description="Unique identifier for the chunk (e.g., {accession_number}_{section}_{index})")
     filing_accession_number: str = Field(..., description="The accession number of the parent filing.")
+    ticker: str = Field(..., description="The ticker symbol of the company.")
     section: str = Field(..., description="The section of the filing this chunk belongs to (e.g., 'Business', 'Risk Factors').")
     chunk_index: int = Field(..., description="The zero-based index of the chunk within its section.")
     s3_path: str = Field(..., description="The S3 path where the raw text of the chunk is stored.")
@@ -29,6 +30,9 @@ class FilingMetadata(BaseModel):
     # Summarization status
     processing_status: str = Field(default="pending", description="Overall status of the summarization process (e.g., 'pending', 'chunking', 'summarizing', 'embedding', 'completed', 'failed').")
     summary_s3_path: Optional[str] = Field(None, description="The S3 path to the final comprehensive summary document.")
+    summary_presigned_url: Optional[str] = Field(None, description="The presigned URL for accessing the summary document.")
+    url_expiration: Optional[datetime] = Field(None, description="The expiration time of the presigned URL.")
+    summary_file_id: Optional[str] = Field(None, description="Unique ID for the summary file on S3 to obscure predictable paths.")
     
     # List of chunks associated with this filing
     chunks: List[ChunkMetadata] = Field(default=[], description="A list of metadata for all chunks derived from this filing.")

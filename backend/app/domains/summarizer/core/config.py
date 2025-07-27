@@ -1,8 +1,8 @@
-from app.config import settings
+from app.config import get_settings
 
-# Use the main app config settings
-DATABASE_URL = settings.database_url
-OPENAI_API_KEY = settings.openai_api_key
+def get_openai_api_key() -> str:
+    """Get fresh OpenAI API key from settings - no caching."""
+    return get_settings().openai_api_key
 
 # --- Model Configurations (Centralized) ---
 # Model used for generating individual section summaries (map-reduce step, if needed by API)

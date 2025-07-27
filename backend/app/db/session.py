@@ -1,24 +1,15 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
 
-# Using relative import from backend.app
-from app.config import settings # Point to config.py
+# Database URL from environment variables or a config file
+DATABASE_URL = "postgresql+asyncpg://user:password@localhost/ai_capital" # Replace with your actual database URL
 
-# Create an async engine
-async_engine = create_async_engine(settings.database_url, echo=False)
+engine = create_async_engine(DATABASE_URL, echo=True)
 
-# Create a session factory
-AsyncSessionFactory = sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
+AsyncSessionFactory = async_sessionmaker(
+    engine,
     expire_on_commit=False,
+    class_=AsyncSession,
 )
 
-# Basic dependency getter (might not be used if service layer doesn't need it yet)
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionFactory() as session:
-        try:
-            yield session
-        finally:
-            await session.close() 
+Base = declarative_base() 
