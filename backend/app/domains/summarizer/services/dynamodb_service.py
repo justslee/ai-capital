@@ -429,6 +429,9 @@ class DynamoDBMetadataService:
                     item['summary_file_id'] = str(item['summary_file_id'])
                 for chunk in item.get('chunks', []):
                     chunk['created_at'] = datetime.fromisoformat(chunk['created_at']).replace(tzinfo=timezone.utc)
+                
+                for chunk in item.get('embedding_chunks', []):
+                    chunk['created_at'] = datetime.fromisoformat(chunk['created_at']).replace(tzinfo=timezone.utc)
                 return FilingMetadata(**item)
             return None
         except ClientError as e:
@@ -452,7 +455,12 @@ class DynamoDBMetadataService:
             if metadata.summary_file_id:
                 item['summary_file_id'] = metadata.summary_file_id
             for chunk in item.get('chunks', []):
-                chunk['created_at'] = chunk['created_at'].isoformat()
+                if isinstance(chunk['created_at'], datetime):
+                    chunk['created_at'] = chunk['created_at'].isoformat()
+            
+            for chunk in item.get('embedding_chunks', []):
+                if isinstance(chunk['created_at'], datetime):
+                    chunk['created_at'] = chunk['created_at'].isoformat()
 
             import asyncio
             loop = asyncio.get_event_loop()

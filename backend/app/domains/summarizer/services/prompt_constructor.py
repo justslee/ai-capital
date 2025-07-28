@@ -1,60 +1,82 @@
 from typing import List, Dict, Any, Optional
 
 SUMMARIZATION_PROMPTS = {
-    "chunk_summary": """Summarize the following text from the '{section}' section of an SEC filing. Focus on the key facts and figures.
+    "chunk_summary": """Analyze the following text from the '{section}' section of an SEC filing and extract the most important information. Focus on material facts, key metrics, significant changes, strategic initiatives, and quantitative data.
+
+    Instructions:
+    - Preserve ALL important numerical data (revenue, expenses, percentages, dates, etc.)
+    - Highlight key business developments, strategic changes, or operational updates
+    - Include material risks, opportunities, or competitive factors mentioned
+    - Maintain context about what metrics relate to (e.g., "Q3 2023 revenue increased 15%")
+    - Be comprehensive but concise - capture the essence without losing critical details
     
-    Text:
+    Text from {section}:
     {text}
     
-    Summary:""",
+    Key Information Summary:""",
     
-    "section_synthesis": """Synthesize the following chunk summaries from the '{section}' section into a coherent summary of the entire section.
+    "section_synthesis": """Combine the following chunk summaries from the '{section}' section into a comprehensive, well-organized section summary.
+
+    Instructions:
+    - Organize information logically and remove redundancy
+    - Preserve all important quantitative data and key metrics
+    - Group related concepts together
+    - Maintain the materiality and context of the information
+    - Create a flowing narrative that captures the complete picture of this section
     
-    Chunk Summaries:
+    Chunk Summaries from {section}:
     {chunk_summaries}
     
-    Synthesized Section Summary:""",
+    Comprehensive Section Summary:""",
     
     "comprehensive_report": """
-As an expert senior analyst at a top-tier hedge fund, your task is to produce a comprehensive investment analysis report for {ticker} based on its latest {form_type} filing. The report must be clear, concise, and structured for a portfolio manager to make a quick, informed investment decision.
+You are an expert financial analyst creating a comprehensive summary of {ticker}'s {form_type} filing. Focus on extracting and organizing the most material information for institutional investors who need to understand the company's current state, performance, and key factors affecting its business.
 
-Use the following section summaries extracted directly from the filing as your primary source of information:
+Use the following section summaries from the filing:
 
---- BEGIN FILING SECTION SUMMARIES ---
+--- FILING SECTION SUMMARIES ---
 {sections_text}
---- END FILING SECTION SUMMARIES ---
+--- END SECTIONS ---
 
-Based on the information above, generate a report with the following structure. Be thorough and insightful in each section.
+Create a well-structured, comprehensive summary with the following sections:
 
-**1. Executive Summary:**
-   - Provide a concise, high-level overview of the company's performance, strategic position, and the key investment thesis.
-   - Should be a short paragraph.
+**Executive Summary**
+- High-level overview of the company's current performance and position
+- Most significant developments or changes since the last filing
+- Key takeaways that matter most to investors
 
-**2. Company Overview:**
-   - Briefly describe the business model, primary segments, and key products/services.
+**Business Overview**
+- Core business model and primary revenue streams
+- Key segments, products, or services driving performance
+- Any material changes to business operations or strategy
 
-**3. Investment Thesis (Bull & Bear Case):**
-   - **Bull Case:** Articulate the primary reasons to be bullish on the stock. What are the key growth drivers, competitive advantages, and market opportunities?
-   - **Bear Case:** Articulate the primary counter-arguments. What are the significant headwinds, competitive threats, and execution risks?
+**Financial Performance**
+- Revenue, profitability, and cash flow trends
+- Balance sheet health and capital structure
+- Key financial metrics and their year-over-year changes
+- Notable financial developments or concerns
 
-**4. Financial Analysis:**
-   - Analyze the key financial metrics reported. Comment on revenue trends, profitability (margins), and cash flow.
-   - Discuss the health of the balance sheet (debt, cash position).
-   - Highlight any standout financial figures or trends.
+**Strategic Initiatives & Outlook**
+- Management's key strategic priorities and initiatives
+- Investment in growth areas, R&D, or new markets
+- Future outlook and guidance provided by management
 
-**5. Competitive Landscape:**
-   - Identify the main competitors mentioned or implied in the filing.
-   - Briefly assess {ticker}'s competitive positioning within its industry.
+**Risk Factors & Challenges**
+- Most material risks facing the business
+- Regulatory, competitive, or operational challenges
+- Market or industry headwinds affecting performance
 
-**6. Risk Factor Analysis:**
-   - Synthesize the most critical risks disclosed in the filing. Do not just list them; explain their potential impact on the business.
-   - Categorize them if possible (e.g., market risks, operational risks, regulatory risks).
+**Key Operational Metrics**
+- Industry-specific metrics relevant to the business
+- Performance indicators beyond traditional financials
+- Trends in customer base, market share, or operational efficiency
 
-**7. Management & Strategy:**
-   - Briefly comment on management's discussion of their strategy, operational focus, and outlook for the future based on the provided text.
-
-**8. Final Recommendation:**
-   - Based *only* on the provided text, provide a concluding thought on the investment profile of the company. Is it more compelling or more cautionary? Do not use external information.
+Instructions:
+- Be comprehensive but focused on material information
+- Preserve important quantitative data with proper context
+- Organize information logically within each section
+- Avoid investment recommendations - focus on factual summary
+- Length should adapt based on the amount of material information available
 """,
 
     "rag_qa": """
@@ -111,7 +133,7 @@ class PromptConstructor:
 
     def construct_rag_qa_prompt(self, query: str, context: str) -> str:
         """Constructs the prompt for the RAG Q&A."""
-        template = SUMMARIZATION_PROMPTS.get("rag_qa", "")
+        template = SUMMARIZATION_PROMPTS["rag_qa"]
         return template.format(query=query, context=context)
 
 # Singleton instance

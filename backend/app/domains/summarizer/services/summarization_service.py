@@ -1,8 +1,10 @@
 import logging
+import asyncio
 from typing import Optional, Dict
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import uuid # Import uuid module
+import re # For sanitizing titles
 
 # App imports  
 from ....schemas.filings import SECFiling
@@ -12,6 +14,7 @@ from ..models.metadata import FilingMetadata, ChunkMetadata
 from .dynamodb_service import DynamoDBMetadataService, get_db_metadata_service
 from .parsing_service import DocumentParsingService, get_parsing_service
 from .chunking_service import ChunkingService, get_chunking_service
+from .summarization_chunking_service import SummarizationChunkingService, get_summarization_chunking_service
 from .llm_orchestration_service import LLMOrchestrationService, get_llm_orchestration_service
 from .embedding_service import EmbeddingService, get_embedding_service
 from ...data_collection.storage.s3_storage_service import S3StorageService, get_s3_storage_service
@@ -27,10 +30,22 @@ class SummarizationService:
         """Initializes the service with its dependencies."""
         self.db_service: DynamoDBMetadataService = get_db_metadata_service()
         self.parsing_service: DocumentParsingService = get_parsing_service()
-        self.chunking_service: ChunkingService = get_chunking_service()
+        self.chunking_service: ChunkingService = get_chunking_service()  # For embeddings
+        self.summarization_chunking_service: SummarizationChunkingService = get_summarization_chunking_service()  # For summarization
         self.s3_service: S3StorageService = get_s3_storage_service()
         self.llm_orchestration_service: LLMOrchestrationService = get_llm_orchestration_service()
         self.embedding_service: EmbeddingService = get_embedding_service()
+
+    def _sanitize_title_for_path(self, title: str, max_length: int = 15) -> str:
+        """Sanitizes a section title for use in a file path."""
+        if not title:
+            return "untitled"
+        # Replace spaces and common separators with underscores
+        title = re.sub(r'[\\s/\\:]+', '_', title)
+        # Remove any characters that are not alphanumeric, underscore, or hyphen
+        sanitized_title = re.sub(r'[^\w\\-_]', '', title)
+        # Truncate to max_length
+        return sanitized_title[:max_length]
 
     async def get_summary(self, ticker: str, year: Optional[int] = None, form_type: Optional[str] = None) -> str:
         """
@@ -86,30 +101,54 @@ class SummarizationService:
             filing_date=filing_to_process.filing_date
         )
 
-        # --- Chunking and Storage ---
+        # --- Dual Chunking and Storage ---
         if not metadata.chunks:
             metadata.processing_status = "chunking"
             await self.db_service.save_filing_metadata(metadata)
             
-            sections = await self.parsing_service.get_filing_sections(ticker, accession_number, filing_to_process.form_type)
+            # Get ALL sections for embeddings (complete text for Q&A)
+            all_sections = await self.parsing_service.get_filing_sections(
+                ticker, accession_number, filing_to_process.form_type, 
+                filter_for_summarization=False
+            )
             
-            chunked_sections = self.chunking_service.chunk_document(sections)
+            # Get FILTERED sections for summarization (only key Items for 10-K)
+            summarization_sections = await self.parsing_service.get_filing_sections(
+                ticker, accession_number, filing_to_process.form_type, 
+                filter_for_summarization=(filing_to_process.form_type == '10-K')
+            )
             
-            chunk_metadata_list = []
+            logger.info(f"Total sections for embeddings: {len(all_sections)}")
+            logger.info(f"Filtered sections for summarization: {len(summarization_sections)}")
             
-            # Process each section's chunks
-            for section_title, section_chunks in chunked_sections.items():
+            # Create chunks from filtered sections for summarization
+            summarization_chunks = self.summarization_chunking_service.chunk_for_summarization(
+                summarization_sections
+            )
+            
+            # Create chunks from ALL sections for embeddings
+            embedding_chunks = self.summarization_chunking_service.chunk_for_embeddings(
+                all_sections
+            )
+            
+            # Store summarization chunks (large chunks) with metadata for processing
+            summarization_metadata_list = []
+            embedding_metadata_list = []
+            
+            # Process summarization chunks (used for the LLM summarization pipeline)
+            for section_title, section_chunks in summarization_chunks.items():
+                sanitized_section_title = self._sanitize_title_for_path(section_title)
                 for chunk_doc in section_chunks:
                     chunk_text = chunk_doc.page_content
                     chunk_index = chunk_doc.metadata.get("chunk_index", 0)
                     
-                    # Create S3 key for this chunk using the sanitized section title
-                    s3_key = f"chunks/{ticker}/{accession_number}/{section_title}/{chunk_index}.txt"
+                    # Create S3 key for summarization chunk
+                    s3_key = f"chunks/summarization/{ticker}/{accession_number}/{sanitized_section_title}_{chunk_index}.txt"
                     await self.s3_service.save_text_chunk(chunk_text, s3_key)
                     
-                    # Create metadata for this chunk
+                    # Create metadata for summarization chunk
                     chunk_meta = ChunkMetadata(
-                        chunk_id=f"{accession_number}_{section_title}_{chunk_index}",
+                        chunk_id=f"{accession_number}_{sanitized_section_title}_{chunk_index}_summarization",
                         filing_accession_number=accession_number,
                         ticker=ticker,
                         section=section_title,
@@ -117,9 +156,35 @@ class SummarizationService:
                         s3_path=s3_key,
                         character_count=len(chunk_text)
                     )
-                    chunk_metadata_list.append(chunk_meta)
+                    summarization_metadata_list.append(chunk_meta)
 
-            metadata.chunks = chunk_metadata_list
+            # Process embedding chunks (used for RAG/Q&A)
+            for section_title, section_chunks in embedding_chunks.items():
+                sanitized_section_title = self._sanitize_title_for_path(section_title)
+                for chunk_doc in section_chunks:
+                    chunk_text = chunk_doc.page_content
+                    chunk_index = chunk_doc.metadata.get("chunk_index", 0)
+                    
+                    # Create S3 key for embedding chunk
+                    s3_key = f"chunks/embedding/{ticker}/{accession_number}/{sanitized_section_title}_{chunk_index}.txt"
+                    await self.s3_service.save_text_chunk(chunk_text, s3_key)
+                    
+                    # Create metadata for embedding chunk
+                    chunk_meta = ChunkMetadata(
+                        chunk_id=f"{accession_number}_{sanitized_section_title}_{chunk_index}_embedding",
+                        filing_accession_number=accession_number,
+                        ticker=ticker,
+                        section=section_title,
+                        chunk_index=chunk_index,
+                        s3_path=s3_key,
+                        character_count=len(chunk_text)
+                    )
+                    embedding_metadata_list.append(chunk_meta)
+
+            # Store summarization chunks in metadata for the summarization pipeline
+            metadata.chunks = summarization_metadata_list
+            # Store embedding chunks separately for the embedding pipeline
+            metadata.embedding_chunks = embedding_metadata_list
             metadata.processing_status = "chunking_complete"
             await self.db_service.save_filing_metadata(metadata)
         
@@ -132,23 +197,8 @@ class SummarizationService:
         for chunk_meta in metadata.chunks:
             chunks_by_section[chunk_meta.section].append(chunk_meta)
 
-        section_summaries = {}
-        for section, chunks_in_section in chunks_by_section.items():
-            # MAP: Summarize each chunk
-            chunk_summaries = []
-            for chunk_meta in chunks_in_section:
-                # Read the actual chunk text from S3
-                chunk_text = await self.s3_service._get_object_content(chunk_meta.s3_path)
-                if not chunk_text:
-                    logger.warning(f"Could not read chunk text from {chunk_meta.s3_path}. Skipping.")
-                    continue
-                
-                summary = await self.llm_orchestration_service.summarize_chunk(chunk_text, chunk_meta.section)
-                chunk_summaries.append(summary)
-            
-            # REDUCE: Synthesize section summary
-            section_summary = await self.llm_orchestration_service.synthesize_section_summary(chunk_summaries, section)
-            section_summaries[section] = section_summary
+        # Process sections concurrently with rate limiting
+        section_summaries = await self._process_sections_concurrently(chunks_by_section)
 
         comprehensive_summary = await self.llm_orchestration_service.generate_comprehensive_summary(
             section_summaries, 
@@ -164,7 +214,8 @@ class SummarizationService:
         metadata.processing_status = "embedding"
         await self.db_service.save_filing_metadata(metadata)
         
-        await self.embedding_service.generate_and_store_embeddings(metadata.chunks)
+        # Use embedding chunks (smaller, more precise) for better RAG performance
+        await self.embedding_service.generate_and_store_embeddings(metadata.embedding_chunks)
         
         # This status update might happen in a separate callback/worker in a real system
         metadata.processing_status = "embedding_complete"
@@ -241,6 +292,114 @@ class SummarizationService:
         except Exception as e:
             logger.error(f"Error fetching filing data for {ticker}: {e}")
             return None
+
+    async def _process_sections_concurrently(self, chunks_by_section: Dict) -> Dict[str, str]:
+        """
+        Process all sections concurrently with rate limiting for optimal performance.
+        
+        :param chunks_by_section: Dictionary mapping section names to chunk metadata
+        :return: Dictionary mapping section names to their summaries
+        """
+        logger.info(f"Processing {len(chunks_by_section)} sections concurrently")
+        
+        # Create semaphore for rate limiting (max 2 concurrent LLM calls)
+        semaphore = asyncio.Semaphore(2)
+        
+        # Process all sections concurrently
+        section_tasks = []
+        for section, chunks_in_section in chunks_by_section.items():
+            task = self._process_section_with_rate_limit(section, chunks_in_section, semaphore)
+            section_tasks.append((section, task))
+        
+        # Wait for all sections to complete
+        section_summaries = {}
+        for section, task in section_tasks:
+            try:
+                section_summary = await task
+                section_summaries[section] = section_summary
+                logger.info(f"Completed processing section: {section}")
+            except Exception as e:
+                logger.error(f"Error processing section {section}: {e}")
+                section_summaries[section] = f"Error processing section: {str(e)}"
+        
+        logger.info(f"Completed processing all {len(section_summaries)} sections")
+        return section_summaries
+
+    async def _process_section_with_rate_limit(self, section: str, chunks_in_section: list, semaphore: asyncio.Semaphore) -> str:
+        """
+        Process a single section's chunks concurrently with rate limiting.
+        
+        :param section: Section name
+        :param chunks_in_section: List of chunk metadata for this section
+        :param semaphore: Semaphore for rate limiting
+        :return: Section summary
+        """
+        logger.info(f"Processing section '{section}' with {len(chunks_in_section)} chunks")
+        
+        # Process all chunks in this section concurrently
+        chunk_tasks = []
+        for chunk_meta in chunks_in_section:
+            task = self._process_chunk_with_rate_limit(chunk_meta, section, semaphore)
+            chunk_tasks.append(task)
+        
+        # Wait for all chunks in this section to complete
+        chunk_summaries = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+        
+        # Filter out exceptions and None values
+        valid_summaries = []
+        for i, summary in enumerate(chunk_summaries):
+            if isinstance(summary, Exception):
+                logger.error(f"Error processing chunk {i} in section {section}: {summary}")
+            elif summary and summary.strip():
+                valid_summaries.append(summary)
+        
+        if not valid_summaries:
+            logger.warning(f"No valid chunk summaries for section '{section}'")
+            return f"No content available for section: {section}"
+        
+        # REDUCE: Synthesize section summary from chunk summaries
+        logger.info(f"Synthesizing {len(valid_summaries)} chunk summaries for section '{section}'")
+        section_summary = await self.llm_orchestration_service.synthesize_section_summary(valid_summaries, section)
+        
+        return section_summary
+
+    async def _process_chunk_with_rate_limit(self, chunk_meta, section: str, semaphore: asyncio.Semaphore) -> Optional[str]:
+        """
+        Process a single chunk with rate limiting and error handling.
+        
+        :param chunk_meta: Chunk metadata containing S3 path
+        :param section: Section name for context
+        :param semaphore: Semaphore for rate limiting
+        :return: Chunk summary or None if failed
+        """
+        async with semaphore:
+            try:
+                # Add small delay to avoid overwhelming the API
+                await asyncio.sleep(0.1)
+                
+                # Read the actual chunk text from S3
+                chunk_text = await self.s3_service._get_object_content(chunk_meta.s3_path)
+                if not chunk_text:
+                    logger.warning(f"Could not read chunk text from {chunk_meta.s3_path}")
+                    return None
+                
+                # Summarize the chunk
+                summary = await self.llm_orchestration_service.summarize_chunk(chunk_text, section)
+                
+                if summary and summary.strip():
+                    return summary
+                else:
+                    logger.warning(f"Empty summary returned for chunk in section {section}")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Error processing chunk in section {section}: {e}")
+                # Implement exponential backoff for rate limit errors
+                if "rate limit" in str(e).lower():
+                    backoff_time = 2 ** (3)  # Start with 8 seconds
+                    logger.info(f"Rate limit hit, backing off for {backoff_time} seconds")
+                    await asyncio.sleep(backoff_time)
+                return None
 
 # Singleton instance
 _summarization_service: Optional[SummarizationService] = None

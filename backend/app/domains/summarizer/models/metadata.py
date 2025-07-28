@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class ChunkMetadata(BaseModel):
     """
@@ -15,7 +15,7 @@ class ChunkMetadata(BaseModel):
     character_count: int = Field(..., description="Number of characters in the chunk.")
     token_count: Optional[int] = Field(None, description="Estimated number of tokens in the chunk.")
     embedding_status: str = Field(default="pending", description="Status of the embedding generation (e.g., 'pending', 'completed', 'failed').")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class FilingMetadata(BaseModel):
     """
@@ -35,11 +35,12 @@ class FilingMetadata(BaseModel):
     summary_file_id: Optional[str] = Field(None, description="Unique ID for the summary file on S3 to obscure predictable paths.")
     
     # List of chunks associated with this filing
-    chunks: List[ChunkMetadata] = Field(default=[], description="A list of metadata for all chunks derived from this filing.")
+    chunks: List[ChunkMetadata] = Field(default=[], description="A list of metadata for large chunks used for summarization.")
+    embedding_chunks: List[ChunkMetadata] = Field(default=[], description="A list of metadata for small chunks used for embeddings/RAG.")
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         # Pydantic configuration to allow creating models from dictionary

@@ -32,7 +32,7 @@ class LLMOrchestrationService:
         result = await self.llm_client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             model="gpt-3.5-turbo",
-            max_tokens=150,
+            max_tokens=500,
             temperature=0.7
         )
         summary = result.get('content', '') if result else ''
@@ -63,7 +63,7 @@ class LLMOrchestrationService:
         result = await self.llm_client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             model="gpt-3.5-turbo",
-            max_tokens=300,
+            max_tokens=800,
             temperature=0.7
         )
         summary = result.get('content', '') if result else ''
@@ -95,7 +95,7 @@ class LLMOrchestrationService:
         result = await self.llm_client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             model="gpt-4-turbo",
-            max_tokens=2500,
+            max_tokens=4000,
             temperature=0.7
         )
         summary = result.get('content', '') if result else ''
