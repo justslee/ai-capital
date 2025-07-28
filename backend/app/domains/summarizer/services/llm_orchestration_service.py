@@ -30,7 +30,7 @@ class LLMOrchestrationService:
         
         # Use simplified OpenAI client
         result = await self.llm_client.chat_completion(
-            messages=prompt,
+            messages=[{"role": "user", "content": prompt}],
             model="gpt-3.5-turbo",
             max_tokens=150,
             temperature=0.7
@@ -61,7 +61,7 @@ class LLMOrchestrationService:
         
         # Use simplified OpenAI client
         result = await self.llm_client.chat_completion(
-            messages=prompt,
+            messages=[{"role": "user", "content": prompt}],
             model="gpt-3.5-turbo",
             max_tokens=300,
             temperature=0.7
@@ -93,9 +93,9 @@ class LLMOrchestrationService:
         
         # Use simplified OpenAI client with higher-quality model for comprehensive summary
         result = await self.llm_client.chat_completion(
-            messages=prompt,
+            messages=[{"role": "user", "content": prompt}],
             model="gpt-4-turbo",
-            max_tokens=700,
+            max_tokens=2500,
             temperature=0.7
         )
         summary = result.get('content', '') if result else ''
@@ -105,6 +105,32 @@ class LLMOrchestrationService:
             return ""
 
         return summary
+
+    async def answer_question_with_context(self, query: str, context: str) -> str:
+        """
+        Answers a question using the provided context.
+
+        :param query: The user's question.
+        :param context: The context retrieved from the document chunks.
+        :return: The answer to the question.
+        """
+        logger.info(f"Answering question '{query}' with context of {len(context)} characters.")
+        
+        prompt = self.prompt_constructor.construct_rag_qa_prompt(query, context)
+        
+        result = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-4-turbo",
+            max_tokens=500,
+            temperature=0.2
+        )
+        answer = result.get('content', '') if result else ''
+        
+        if not answer:
+            logger.error(f"Failed to answer question '{query}'.")
+            return "Could not generate an answer based on the provided context."
+
+        return answer
 
 
 def get_llm_orchestration_service() -> "LLMOrchestrationService":

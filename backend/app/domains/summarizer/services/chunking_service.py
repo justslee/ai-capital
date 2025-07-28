@@ -1,69 +1,84 @@
+"""
+Service for chunking HTML content using semantic-preserving splitting.
+Enhanced to handle sec-parser semantic elements.
+"""
+
 import logging
-from typing import List, Optional, Dict, NamedTuple
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from typing import Dict, List, Optional, Any
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.schema import Document
 
 logger = logging.getLogger(__name__)
 
-class Chunk(NamedTuple):
-    """
-    A structured representation of a text chunk.
-    """
-    text: str
-    section: str
-    chunk_index: int
 
-class SectionAwareChunkingService:
+class ChunkingService:
     """
-    Service responsible for splitting a dictionary of text sections into smaller chunks.
+    Service responsible for splitting text from SEC filings into manageable chunks.
     """
-    def __init__(self, chunk_size: int = 4000, chunk_overlap: int = 200):
+    def __init__(self, max_chunk_size: int = 2000):
         """
-        Initializes the service with a text splitter.
-
-        :param chunk_size: The maximum number of characters in a chunk.
-        :param chunk_overlap: The number of characters to overlap between chunks.
+        Initializes the service with a text splitter optimized for RAG and Q&A.
+        
+        :param max_chunk_size: The maximum number of characters in a chunk.
         """
+        self.max_chunk_size = max_chunk_size
+        
+        chunk_overlap = max(150, int(max_chunk_size * 0.125))
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
+            chunk_size=max_chunk_size,
             chunk_overlap=chunk_overlap,
-            length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""]
         )
 
-    def chunk_document(self, sections: Dict[str, str]) -> List[Chunk]:
+    def chunk_document(self, sections: Dict[str, str]) -> Dict[str, List[Document]]:
         """
-        Splits a document (represented as a dictionary of sections) into a list of chunks.
-
-        :param sections: A dictionary where keys are section names and values are their text content.
-        :return: A list of structured Chunk objects.
+        Chunks each section of the document into smaller, manageable pieces.
+        
+        :param sections: Dictionary mapping section titles to their aggregated text content.
+        :return: Dictionary mapping section titles to lists of chunked Document objects.
         """
-        all_chunks = []
-        for section_name, section_text in sections.items():
-            if not section_text:
-                logger.warning(f"Section '{section_name}' is empty, skipping chunking.")
+        logger.info(f"Starting chunking for {len(sections)} sections")
+        
+        chunked_sections = {}
+        
+        for section_title, section_content in sections.items():
+            if not section_content or not section_content.strip():
+                logger.warning(f"Section '{section_title}' is empty, skipping")
                 continue
 
-            logger.info(f"Chunking section '{section_name}' of length {len(section_text)}.")
+            chunks = self.text_splitter.split_text(section_content)
             
-            text_chunks = self.text_splitter.split_text(section_text)
+            documents = []
+            for i, chunk in enumerate(chunks):
+                doc = Document(
+                    page_content=chunk,
+                    metadata={
+                        "section": section_title,
+                        "chunk_index": i
+                    }
+                )
+                documents.append(doc)
             
-            for i, chunk_text in enumerate(text_chunks):
-                all_chunks.append(Chunk(
-                    text=chunk_text,
-                    section=section_name,
-                    chunk_index=i
-                ))
+            chunked_sections[section_title] = documents
+            logger.info(f"Section '{section_title}' split into {len(documents)} chunks")
+
+        total_chunks = sum(len(chunks) for chunks in chunked_sections.values())
+        logger.info(f"Total chunks created: {total_chunks}")
         
-        logger.info(f"Successfully created {len(all_chunks)} chunks from {len(sections)} sections.")
-        return all_chunks
+        return chunked_sections
 
-# Singleton instance
-_chunking_service: Optional[SectionAwareChunkingService] = None
 
-def get_chunking_service() -> "SectionAwareChunkingService":
+# Global instance for dependency injection
+_chunking_service_instance: Optional[ChunkingService] = None
+
+
+def get_chunking_service() -> ChunkingService:
     """
-    Provides a singleton instance of the SectionAwareChunkingService.
+    Get or create a singleton instance of the chunking service.
+    
+    :return: ChunkingService instance.
     """
-    global _chunking_service
-    if _chunking_service is None:
-        _chunking_service = SectionAwareChunkingService()
-    return _chunking_service 
+    global _chunking_service_instance
+    if _chunking_service_instance is None:
+        _chunking_service_instance = ChunkingService()
+    return _chunking_service_instance 

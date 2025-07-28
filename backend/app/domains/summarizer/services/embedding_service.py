@@ -82,14 +82,14 @@ class EmbeddingService:
             # 3. Prepare vectors for upsert
             for chunk, embedding in zip(batch_chunks, embeddings):
                 vectors_to_upsert.append({
-                    "id": chunk.chunk_id,
+                    "id": chunk.chunk_id, # Revert to using the generated chunk_id
                     "values": embedding.tolist(),
                     "metadata": {
                         "ticker": chunk.ticker,
                         "accession_number": chunk.filing_accession_number,
                         "section": chunk.section,
                         "chunk_index": chunk.chunk_index,
-                        "s3_path": chunk.s3_path,
+                        "s3_path": chunk.s3_path, # Ensure s3_path is in metadata
                         "character_count": chunk.character_count
                     }
                 })
@@ -99,6 +99,24 @@ class EmbeddingService:
             logger.info(f"Upserting {len(vectors_to_upsert)} vectors to Pinecone.")
             self.index.upsert(vectors=vectors_to_upsert, namespace="sec-filings")
             logger.info("Upsert to Pinecone complete.")
+
+    async def query_pinecone(self, embedding: List[float], ticker: str, top_k: int) -> List:
+        """
+        Queries the Pinecone index to find the most relevant chunks.
+        """
+        logger.info(f"Querying Pinecone for ticker {ticker} with top_k={top_k}.")
+        
+        query_results = self.index.query(
+            namespace="sec-filings",
+            vector=embedding,
+            filter={"ticker": {"$eq": ticker}},
+            top_k=top_k,
+            include_metadata=True, # We need the metadata to get the s3_path
+            include_values=False
+        )
+        
+        # Return a list of (s3_path, score)
+        return [(match['metadata']['s3_path'], match['score']) for match in query_results.get('matches', []) if 's3_path' in match.get('metadata', {})]
 
 # Singleton instance
 _embedding_service: Optional[EmbeddingService] = None

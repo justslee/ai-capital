@@ -11,7 +11,7 @@ from ....schemas.filings import SECFiling
 from ..models.metadata import FilingMetadata, ChunkMetadata
 from .dynamodb_service import DynamoDBMetadataService, get_db_metadata_service
 from .parsing_service import DocumentParsingService, get_parsing_service
-from .chunking_service import SectionAwareChunkingService, get_chunking_service
+from .chunking_service import ChunkingService, get_chunking_service
 from .llm_orchestration_service import LLMOrchestrationService, get_llm_orchestration_service
 from .embedding_service import EmbeddingService, get_embedding_service
 from ...data_collection.storage.s3_storage_service import S3StorageService, get_s3_storage_service
@@ -27,7 +27,7 @@ class SummarizationService:
         """Initializes the service with its dependencies."""
         self.db_service: DynamoDBMetadataService = get_db_metadata_service()
         self.parsing_service: DocumentParsingService = get_parsing_service()
-        self.chunking_service: SectionAwareChunkingService = get_chunking_service()
+        self.chunking_service: ChunkingService = get_chunking_service()
         self.s3_service: S3StorageService = get_s3_storage_service()
         self.llm_orchestration_service: LLMOrchestrationService = get_llm_orchestration_service()
         self.embedding_service: EmbeddingService = get_embedding_service()
@@ -91,24 +91,33 @@ class SummarizationService:
             metadata.processing_status = "chunking"
             await self.db_service.save_filing_metadata(metadata)
             
-            sections = await self.parsing_service.get_filing_sections(ticker, accession_number)
-            chunks = self.chunking_service.chunk_document(sections)
+            sections = await self.parsing_service.get_filing_sections(ticker, accession_number, filing_to_process.form_type)
+            
+            chunked_sections = self.chunking_service.chunk_document(sections)
             
             chunk_metadata_list = []
-            for i, chunk in enumerate(chunks):
-                s3_key = f"chunks/{ticker}/{accession_number}/{chunk.section}/{chunk.chunk_index}.txt"
-                await self.s3_service.save_text_chunk(chunk.text, s3_key)
-                
-                chunk_meta = ChunkMetadata(
-                    chunk_id=f"{accession_number}_{chunk.section}_{i}",
-                    filing_accession_number=accession_number,
-                    ticker=ticker,
-                    section=chunk.section,
-                    chunk_index=i,
-                    s3_path=s3_key,
-                    character_count=len(chunk.text)
-                )
-                chunk_metadata_list.append(chunk_meta)
+            
+            # Process each section's chunks
+            for section_title, section_chunks in chunked_sections.items():
+                for chunk_doc in section_chunks:
+                    chunk_text = chunk_doc.page_content
+                    chunk_index = chunk_doc.metadata.get("chunk_index", 0)
+                    
+                    # Create S3 key for this chunk using the sanitized section title
+                    s3_key = f"chunks/{ticker}/{accession_number}/{section_title}/{chunk_index}.txt"
+                    await self.s3_service.save_text_chunk(chunk_text, s3_key)
+                    
+                    # Create metadata for this chunk
+                    chunk_meta = ChunkMetadata(
+                        chunk_id=f"{accession_number}_{section_title}_{chunk_index}",
+                        filing_accession_number=accession_number,
+                        ticker=ticker,
+                        section=section_title,
+                        chunk_index=chunk_index,
+                        s3_path=s3_key,
+                        character_count=len(chunk_text)
+                    )
+                    chunk_metadata_list.append(chunk_meta)
 
             metadata.chunks = chunk_metadata_list
             metadata.processing_status = "chunking_complete"

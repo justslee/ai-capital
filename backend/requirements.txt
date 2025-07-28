@@ -37,9 +37,16 @@ asyncpg
 statsmodels>=0.14.0
 
 langchain
+langchain-text-splitters
+
+# SEC Filing Parsing
+sec-parser
 
 # Vector DB and Embeddings
 sentence-transformers
 pinecone
 anthropic
 openai
+
+# Added for simplified SEC filing downloads
+sec-downloader

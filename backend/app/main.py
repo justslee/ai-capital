@@ -26,6 +26,7 @@ logging.getLogger("app.domains.data_collection.tiingo_client").setLevel(logging.
 
 # Import API routers from each domain
 from .domains.summarizer.api.summary_endpoint import router as summarization_router
+from .domains.summarizer.api.query_endpoint import router as query_router
 from .domains.price_prediction.api.public_endpoints import router as public_price_prediction_router
 from .domains.valuation.api.public_endpoints import router as public_valuation_router
 from .domains.valuation.api.internal_endpoints import router as internal_valuation_router
@@ -43,6 +44,7 @@ api_router = APIRouter()
 api_router.include_router(public_valuation_router, prefix="/valuation", tags=["Valuation"])
 api_router.include_router(public_price_prediction_router, prefix="/predict", tags=["Price Prediction"])
 api_router.include_router(summarization_router, prefix="/summarizer", tags=["Summarization"])
+api_router.include_router(query_router, prefix="/summarizer", tags=["Summarization"])
 api_router.include_router(internal_valuation_router, prefix="/internal/valuation", tags=["Valuation (Internal)"])
 
 
