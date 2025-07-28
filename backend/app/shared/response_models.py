@@ -87,28 +87,17 @@ class SummarizationResponse(APIResponse):
     year: Optional[int] = Field(None, description="Filing year")
     form_type: Optional[str] = Field(None, description="SEC form type")
     accession_number: Optional[str] = Field(None, description="SEC accession number")
-
-
-class ValuationResponse(APIResponse):
-    """Response model for valuation endpoints."""
-    ticker: Optional[str] = Field(None, description="Stock ticker symbol")
-    valuation_type: Optional[str] = Field(None, description="Type of valuation calculation")
-    period: Optional[str] = Field(None, description="Financial data period")
+    s3_path: Optional[str] = Field(None, description="Path to the summary file in S3")
 
 
 class IngestionResponse(APIResponse):
-    """Response model for data ingestion endpoints."""
-    ticker: Optional[str] = Field(None, description="Stock ticker symbol")
-    records_processed: Optional[int] = Field(None, description="Number of records processed")
-    records_inserted: Optional[int] = Field(None, description="Number of records inserted")
-    records_updated: Optional[int] = Field(None, description="Number of records updated")
-    start_date: Optional[str] = Field(None, description="Data start date")
-    end_date: Optional[str] = Field(None, description="Data end date")
-    source: Optional[str] = Field(None, description="Data source")
+    """Response model for data ingestion tasks."""
+    ingestion_id: str = Field(..., description="Unique ID for the ingestion task")
+    status: str = Field(..., description="Status of the ingestion task (e.g., 'started', 'completed')")
 
 
 class BulkIngestionResponse(APIResponse):
-    """Response model for bulk ingestion operations."""
+    """Response model for bulk data ingestion."""
     total_tickers: int = Field(..., description="Total number of tickers processed")
     successful: int = Field(..., description="Number of successful ingestions")
     failed: int = Field(..., description="Number of failed ingestions")

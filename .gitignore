@@ -101,6 +101,11 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+/backend/.venv/
+/backend/app/__pycache__/
+/backend/app/db/__pycache__/
+/backend/app/api/__pycache__/
+/tasks/
 
 # Spyder project settings
 .spyderproject

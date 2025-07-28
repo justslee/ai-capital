@@ -28,66 +28,50 @@ logging.getLogger("app.domains.data_collection.tiingo_client").setLevel(logging.
 from .domains.summarizer.api.summary_endpoint import router as summarization_router
 from .domains.summarizer.api.query_endpoint import router as query_router
 from .domains.price_prediction.api.public_endpoints import router as public_price_prediction_router
-from .domains.valuation.api.public_endpoints import router as public_valuation_router
-from .domains.valuation.api.internal_endpoints import router as internal_valuation_router
 
 app = FastAPI(
     title="AI Capital API",
-    description="API for fetching and analyzing financial data with summarization, valuation, and modeling capabilities.",
-    version="0.1.0"
+    description="API for fetching and analyzing financial data with summarization and modeling capabilities.",
+    version="1.0.0",
+    contact={
+        "name": "API Support",
+        "url": "http://www.example.com/contact",
+    },
+    openapi_tags=[
+        {"name": "Summarization", "description": "Endpoints for summarizing SEC filings."},
+        {"name": "Price Prediction", "description": "Endpoints for predicting stock prices."},
+    ],
+    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc"
 )
 
-# Create a main API router to group all versioned endpoints
-api_router = APIRouter()
+# Create the main API router
+api_router = APIRouter(prefix="/api/v1")
 
 # Routers for each domain
-api_router.include_router(public_valuation_router, prefix="/valuation", tags=["Valuation"])
 api_router.include_router(public_price_prediction_router, prefix="/predict", tags=["Price Prediction"])
 api_router.include_router(summarization_router, prefix="/summarizer", tags=["Summarization"])
 api_router.include_router(query_router, prefix="/summarizer", tags=["Summarization"])
-api_router.include_router(internal_valuation_router, prefix="/internal/valuation", tags=["Valuation (Internal)"])
 
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router)
 
 
-@app.get("/")
-async def read_root():
+# Example usage for the root endpoint
+@app.get("/", include_in_schema=False)
+async def root():
     return {
-        "message": "Welcome to AI Capital API",
-        "version": "0.1.0",
-        "api_structure": {
-            "public_api": {
-                "description": "Client-facing endpoints for core business functionality",
-                "base_url": "/api/v1",
-                "endpoints": {
-                    "filing_summary": "GET /api/v1/summary/{ticker}/{year}/{form_type} - SEC filing analysis",
-                    "dcf_valuation": "GET /api/v1/valuation/dcf/{ticker} - Company valuation",
-                    "price_prediction": "POST /api/v1/predict/{ticker} - AI price forecasting (coming soon)"
-                }
-            },
-            "internal_api": {
-                "description": "Administrative and operational endpoints for system management",
-                "base_url": "/internal",
-                "access": "Internal use only - not for external clients",
-                "categories": [
-                    "Data ingestion and management",
-                    "Storage operations", 
-                    "Health monitoring",
-                    "Raw financial data access"
-                ]
-            }
-        },
-        "domains": {
-            "summarization": "SEC filing summarization and analysis",
-            "valuation": "Company valuation using DCF methodology", 
-            "prediction": "AI-powered stock price forecasting"
-        },
-        "documentation": {
-            "public_api": "/docs - Swagger UI for public endpoints",
-            "full_api": "/docs - Complete API documentation (includes internal endpoints)"
+        "message": "Welcome to the AI Capital API. Visit /api/v1/docs for documentation.",
+        "endpoints": {
+            "summarization": "GET /api/v1/summarizer/summary/{ticker} - SEC filing summarization",
+            "query": "GET /api/v1/summarizer/query/{ticker}?q=... - Q&A on filings",
+            "price_prediction": "GET /api/v1/predict/price/{ticker} - Stock price prediction",
         }
     }
+
+# Add CORS middleware
+# ... existing code ...
 # You can include your API routers here later
 # Example: from .api.endpoints import items
 # app.include_router(items.router, prefix="/items", tags=["items"]) 

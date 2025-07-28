@@ -2,9 +2,9 @@ fastapi
 uvicorn[standard]
 pydantic
 pydantic-settings
-sqlalchemy[asyncio]
+# sqlalchemy[asyncio]
 aiohttp
-pandas
+pandas==2.2.0
 numpy
 openai
 pinecone-client
@@ -23,15 +23,15 @@ fredapi
 polars>=0.20.0  # Optional: Even faster DataFrame operations
 fastparquet>=2023.10.0  # Alternative Parquet engine 
 # S3 Storage Dependencies
-boto3>=1.26.0
+boto3==1.34.40
 botocore>=1.29.0
 
 # Testing
 pytest
 
 # Database Drivers
-psycopg2-binary
-asyncpg
+# psycopg2-binary
+# asyncpg
 
 # ARIMA Modeling
 statsmodels>=0.14.0

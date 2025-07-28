@@ -72,38 +72,10 @@ class PrerequisiteDataMissingException(SummarizationException):
         )
 
 
-class ValuationException(DomainException):
-    """Base exception for valuation domain errors."""
-    pass
-
-
-class FinancialDataNotFoundException(ValuationException):
-    """Raised when financial data is not available for a ticker."""
-    
-    def __init__(self, ticker: str, data_type: str = "financial data"):
-        message = f"No {data_type} available for ticker '{ticker}'"
-        super().__init__(
-            message=message,
-            error_code="FINANCIAL_DATA_NOT_FOUND",
-            details={"ticker": ticker, "data_type": data_type}
-        )
-
-
-class ValuationCalculationException(ValuationException):
-    """Raised when valuation calculations fail."""
-    
-    def __init__(self, ticker: str, valuation_type: str, reason: str):
-        message = f"Failed to calculate {valuation_type} valuation for {ticker}: {reason}"
-        super().__init__(
-            message=message,
-            error_code="VALUATION_CALCULATION_FAILED",
-            details={"ticker": ticker, "valuation_type": valuation_type, "reason": reason}
-        )
-
-
 class ModelingException(DomainException):
     """Base exception for modeling domain errors."""
-    pass
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(message, details=details)
 
 
 class DataIngestionException(ModelingException):
@@ -179,11 +151,9 @@ def domain_exception_to_http_exception(exception: DomainException) -> HTTPExcept
     # Map exception types to HTTP status codes
     status_code_map = {
         FilingNotFoundException: 404,
-        FinancialDataNotFoundException: 404,
         InvalidTickerException: 400,
         PrerequisiteDataMissingException: 409,  # Conflict - prerequisite data missing
         SummaryGenerationException: 500,
-        ValuationCalculationException: 500,
         DataIngestionException: 500,
         DataSourceException: 502,  # Bad Gateway - external service issue
         APIKeyMissingException: 401,  # Unauthorized - missing credentials
