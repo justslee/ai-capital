@@ -5,16 +5,15 @@ Client-facing endpoints for price prediction and modeling functionality.
 Only includes endpoints that external clients should access.
 """
 
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api import deps
 from app.shared.response_models import APIResponse
 from app.shared.exceptions import handle_domain_exception
-from ..price_prediction_service import PricePredictionService
+from app.domains.price_prediction.price_prediction_service import get_price_prediction_service, PricePredictionService
 
 router = APIRouter()
 
@@ -38,7 +37,6 @@ async def predict_stock_price(
         description="Prediction model type",
         regex="^(lstm|linear_regression|ensemble)$"
     ),
-    db: Session = Depends(deps.get_db)
 ):
     """
     Predict future stock price for a given ticker.
@@ -91,3 +89,25 @@ async def predict_stock_price(
             )
         else:
             raise handle_domain_exception(e) 
+
+@router.get("/price/{ticker}", response_model=Dict)
+async def predict_price(
+    ticker: str,
+    days_ahead: int = 30,
+    prediction_service: PricePredictionService = Depends(get_price_prediction_service)
+):
+    """
+    Trains an ARIMA model on historical price data and returns future price predictions.
+    """
+    if not ticker or not isinstance(ticker, str):
+        raise HTTPException(status_code=400, detail="A valid ticker symbol is required.")
+        
+    if not isinstance(days_ahead, int) or not (1 <= days_ahead <= 365):
+        raise HTTPException(status_code=400, detail="Days ahead must be an integer between 1 and 365.")
+
+    result = await prediction_service.train_and_predict(ticker.upper(), days_ahead)
+    
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('error', 'Prediction failed'))
+        
+    return result 
