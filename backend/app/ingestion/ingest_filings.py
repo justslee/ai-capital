@@ -27,8 +27,15 @@ from app.domains.summarizer.parsing.extract_text_from_html import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# List of tickers to process
-TICKERS_TO_INGEST = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]
+# Import ticker configuration instead of hardcoding
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from app.domains.data_collection.config.ticker_config import get_dow_tickers
+
+# Use DOW tickers for SEC filings processing (can be changed to any group)
+TICKERS_TO_INGEST = get_dow_tickers()  # Uses centralized ticker management
 FILING_TYPES_TO_INGEST = ["10-K", "10-Q"]
 RECENT_FILINGS_COUNT = 2 # How many recent filings to check for each type
 

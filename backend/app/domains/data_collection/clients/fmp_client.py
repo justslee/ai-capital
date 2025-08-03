@@ -296,7 +296,12 @@ class FMPClient:
 
     async def test_connection(self) -> bool:
         try:
-            ratios = await self.get_fundamentals_ratios("AAPL", limit=1)
+            # Import ticker config for consistent testing
+            from ..config.ticker_config import get_dow_tickers
+            
+            # Test with the first DOW ticker
+            test_ticker = get_dow_tickers()[0]  # AAPL
+            ratios = await self.get_fundamentals_ratios(test_ticker, limit=1)
             if ratios is not None:
                 return True
             else:

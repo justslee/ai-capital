@@ -5,9 +5,11 @@ This service orchestrates data ingestion from multiple sources,
 including Tiingo for price data, FMP for fundamentals, and the SEC for filings.
 It uses the client and storage services within the data_collection domain
 to create a comprehensive dataset.
+
+Enhanced with centralized ticker management and batch processing capabilities.
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import asyncio
 from datetime import date, timedelta
 
@@ -17,6 +19,7 @@ from ..clients.sec_client import SECClient, get_sec_client
 from ..clients.fred_client import FredClient, get_fred_client
 from ..storage.s3_storage_service import get_s3_storage_service, S3StorageService
 from ..config import get_key_macro_series_ids
+from ..config.ticker_config import get_ticker_config, TickerGroup, TickerConfig
 from ....sec_utils import ticker_to_cik
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,7 @@ class DataCollectionService:
         self.sec_client = get_sec_client()
         self.fred_client = get_fred_client()
         self.storage_service: S3StorageService = get_s3_storage_service()
+        self.ticker_config: TickerConfig = get_ticker_config()
 
     async def collect_key_macro_indicators(self) -> Dict[str, Any]:
         """
@@ -122,6 +126,193 @@ class DataCollectionService:
     async def collect_sentiment_data(self, ticker: str) -> None:
         """Placeholder for collecting sentiment data."""
         raise NotImplementedError("Sentiment data collection is not yet implemented.")
+
+    # Batch Processing Methods with Ticker Groups
+
+    async def collect_daily_prices_batch(self, group: TickerGroup, max_concurrent: int = 5) -> Dict[str, Any]:
+        """
+        Collect daily prices for all tickers in a specified group.
+        
+        Args:
+            group: The ticker group to process
+            max_concurrent: Maximum number of concurrent API calls
+            
+        Returns:
+            Dictionary with batch processing results
+        """
+        tickers = self.ticker_config.get_tickers_by_group(group)
+        
+        if not tickers:
+            return {
+                "status": "no_tickers",
+                "group": group.value,
+                "message": f"No tickers found for group {group.value}"
+            }
+        
+        logger.info(f"Starting batch price collection for {group.value} group ({len(tickers)} tickers)")
+        
+        # Use semaphore to limit concurrent API calls
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def collect_single_ticker(ticker: str) -> Dict[str, Any]:
+            async with semaphore:
+                try:
+                    result = await self.collect_daily_prices(ticker)
+                    # Add small delay to respect API rate limits
+                    await asyncio.sleep(0.1)
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to collect prices for {ticker}: {e}")
+                    return {
+                        "status": "error", 
+                        "ticker": ticker, 
+                        "source": "tiingo",
+                        "error": str(e)
+                    }
+        
+        # Execute all ticker collections concurrently
+        tasks = [collect_single_ticker(ticker) for ticker in tickers]
+        results = await asyncio.gather(*tasks)
+        
+        # Summarize results
+        successful = [r for r in results if r.get("status") == "success"]
+        up_to_date = [r for r in results if r.get("status") == "up_to_date"]
+        failed = [r for r in results if r.get("status") == "error"]
+        no_data = [r for r in results if r.get("status") == "no_new_data"]
+        
+        summary = {
+            "status": "completed",
+            "group": group.value,
+            "total_tickers": len(tickers),
+            "successful": len(successful),
+            "up_to_date": len(up_to_date),
+            "failed": len(failed),
+            "no_new_data": len(no_data),
+            "results": results
+        }
+        
+        logger.info(f"Batch price collection completed for {group.value}: "
+                   f"{len(successful)} successful, {len(failed)} failed")
+        
+        return summary
+
+    async def collect_fundamentals_batch(self, group: TickerGroup, max_concurrent: int = 3, limit: int = 5) -> Dict[str, Any]:
+        """
+        Collect fundamental data for all tickers in a specified group.
+        
+        Args:
+            group: The ticker group to process
+            max_concurrent: Maximum number of concurrent API calls (lower for fundamentals)
+            limit: Number of years of fundamental data to fetch
+            
+        Returns:
+            Dictionary with batch processing results
+        """
+        tickers = self.ticker_config.get_tickers_by_group(group)
+        
+        if not tickers:
+            return {
+                "status": "no_tickers",
+                "group": group.value,
+                "message": f"No tickers found for group {group.value}"
+            }
+        
+        logger.info(f"Starting batch fundamentals collection for {group.value} group ({len(tickers)} tickers)")
+        
+        # Use semaphore to limit concurrent API calls (more conservative for fundamentals)
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def collect_single_ticker(ticker: str) -> Dict[str, Any]:
+            async with semaphore:
+                try:
+                    result = await self.collect_fundamentals(ticker, limit=limit)
+                    # Add delay to respect API rate limits
+                    await asyncio.sleep(0.5)
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to collect fundamentals for {ticker}: {e}")
+                    return {
+                        "status": "error", 
+                        "ticker": ticker, 
+                        "source": "fmp",
+                        "error": str(e)
+                    }
+        
+        # Execute all ticker collections concurrently
+        tasks = [collect_single_ticker(ticker) for ticker in tickers]
+        results = await asyncio.gather(*tasks)
+        
+        # Summarize results
+        successful = [r for r in results if r.get("status") == "success"]
+        failed = [r for r in results if r.get("status") == "error"]
+        no_data = [r for r in results if r.get("status") == "no_new_data"]
+        
+        summary = {
+            "status": "completed",
+            "group": group.value,
+            "total_tickers": len(tickers),
+            "successful": len(successful),
+            "failed": len(failed),
+            "no_new_data": len(no_data),
+            "results": results
+        }
+        
+        logger.info(f"Batch fundamentals collection completed for {group.value}: "
+                   f"{len(successful)} successful, {len(failed)} failed")
+        
+        return summary
+
+    async def collect_comprehensive_batch(self, group: TickerGroup, include_fundamentals: bool = True) -> Dict[str, Any]:
+        """
+        Collect both prices and fundamentals for all tickers in a group.
+        
+        Args:
+            group: The ticker group to process
+            include_fundamentals: Whether to collect fundamental data
+        
+        Returns:
+            Dictionary with comprehensive batch processing results
+        """
+        logger.info(f"Starting comprehensive data collection for {group.value} group")
+        
+        # Collect prices first (faster)
+        price_results = await self.collect_daily_prices_batch(group)
+        
+        results = {
+            "status": "completed",
+            "group": group.value,
+            "price_collection": price_results
+        }
+        
+        if include_fundamentals:
+            # Collect fundamentals second (slower, more rate-limited)
+            fundamentals_results = await self.collect_fundamentals_batch(group)
+            results["fundamentals_collection"] = fundamentals_results
+        
+        return results
+
+    def get_available_ticker_groups(self) -> List[Dict[str, Any]]:
+        """Get information about all available ticker groups."""
+        return [
+            {
+                "group": group.value,
+                "description": self._get_group_description(group),
+                "ticker_count": len(self.ticker_config.get_tickers_by_group(group)),
+                "sample_tickers": self.ticker_config.get_tickers_by_group(group)[:5]
+            }
+            for group in TickerGroup if group != TickerGroup.ALL
+        ]
+    
+    def _get_group_description(self, group: TickerGroup) -> str:
+        """Get human-readable description for ticker groups."""
+        descriptions = {
+            TickerGroup.DOW: "Dow Jones Industrial Average (30 components)",
+            TickerGroup.SP500: "S&P 500 Index (500 large-cap stocks)",
+            TickerGroup.NASDAQ: "NASDAQ 100 Index (100 largest non-financial stocks)",
+            TickerGroup.RUSSELL2000: "Russell 2000 Index (small-cap stocks)",
+            TickerGroup.TOP_ETFS: "Major Index and Sector ETFs"
+        }
+        return descriptions.get(group, f"Ticker group: {group.value}")
 
 _data_collection_service = None
 

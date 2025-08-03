@@ -19,6 +19,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 
 from app.domains.modeling.data_ingestion.price_data_ingestion import price_data_ingestion_service
 from app.domains.modeling.config.modeling_config import get_sp100_symbols, get_all_target_symbols, get_index_symbols
+from app.domains.data_collection.config.ticker_config import (
+    get_dow_tickers, get_sp500_tickers, get_nasdaq_tickers, get_russell2000_tickers, get_top_etfs
+)
 from app.db.session import AsyncSessionLocal
 
 # Configure logging
@@ -276,11 +279,21 @@ def main():
         asyncio.run(show_data_coverage(tickers=args.tickers))
     
     elif args.command == 'symbols':
-        print("Available Symbol Groups:")
+        print("Available Symbol Groups (Centralized Ticker Config):")
+        print(f"DOW: {len(get_dow_tickers())} symbols")
+        print(f"S&P 500: {len(get_sp500_tickers())} symbols") 
+        print(f"NASDAQ 100: {len(get_nasdaq_tickers())} symbols")
+        print(f"Russell 2000: {len(get_russell2000_tickers())} symbols")
+        print(f"Top ETFs: {len(get_top_etfs())} symbols")
+        
+        print(f"\nFirst 10 DOW symbols: {', '.join(get_dow_tickers()[:10])}")
+        print(f"First 10 S&P 500 symbols: {', '.join(get_sp500_tickers()[:10])}")
+        
+        # Legacy symbol groups (still available)
+        print(f"\nLegacy Groups:")
         print(f"S&P 100: {len(get_sp100_symbols())} symbols")
         print(f"Major Indexes: {len(get_index_symbols())} symbols")
         print(f"All Targets: {len(get_all_target_symbols())} symbols")
-        print(f"\nFirst 10 S&P 100 symbols: {', '.join(get_sp100_symbols()[:10])}")
 
 
 if __name__ == "__main__":

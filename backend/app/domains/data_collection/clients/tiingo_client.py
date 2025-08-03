@@ -209,9 +209,13 @@ class TiingoClient:
 
     async def test_connection(self) -> bool:
         try:
-            # Try to get metadata for a common ticker like AAPL
-            metadata = await self.get_ticker_metadata("AAPL")
-            if metadata and metadata.ticker == "AAPL":
+            # Import ticker config for consistent testing
+            from ..config.ticker_config import get_dow_tickers
+            
+            # Try to get metadata for the first DOW ticker (reliable test case)
+            test_ticker = get_dow_tickers()[0]  # AAPL
+            metadata = await self.get_ticker_metadata(test_ticker)
+            if metadata and metadata.ticker == test_ticker:
                 return True
             else:
                 return False

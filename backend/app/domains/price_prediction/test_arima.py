@@ -1,7 +1,8 @@
 """
-Basic test script for ARIMA model using exported AAPL data.
+Basic test script for ARIMA model using exported ticker data.
 
 This script tests the ARIMA model implementation with real data from the exports folder.
+Uses centralized ticker configuration for consistent testing.
 """
 
 import os
@@ -15,6 +16,7 @@ backend_path = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
 from app.domains.price_prediction.models.arima import ArimaPredictor
+from app.domains.data_collection.config.ticker_config import get_dow_tickers
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def load_test_data():
-    """Load exported AAPL data for testing."""
-    # Look for the exported data file
-    exports_path = Path(__file__).parent.parent.parent.parent.parent / "exports" / "merged_AAPL.csv"
+    """Load exported data for testing using centralized ticker config."""
+    # Use the first DOW ticker for testing (AAPL)
+    test_ticker = get_dow_tickers()[0]
+    exports_path = Path(__file__).parent.parent.parent.parent.parent / "exports" / f"merged_{test_ticker}.csv"
     
     if not exports_path.exists():
         raise FileNotFoundError(f"Test data not found at {exports_path}")
@@ -41,7 +44,7 @@ def load_test_data():
 
 
 def test_arima_model():
-    """Test the ARIMA model with AAPL data."""
+    """Test the ARIMA model with ticker data from centralized config."""
     logger.info("Starting ARIMA model test")
     
     try:
