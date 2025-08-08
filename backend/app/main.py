@@ -28,6 +28,10 @@ logging.getLogger("app.domains.data_collection.tiingo_client").setLevel(logging.
 from .domains.summarizer.api.summary_endpoint import router as summarization_router
 from .domains.summarizer.api.query_endpoint import router as query_router
 from .domains.price_prediction.api.public_endpoints import router as public_price_prediction_router
+from .domains.portfolio_manager.api.user_endpoints import router as user_router
+from .domains.portfolio_manager.api.portfolio_endpoints import router as portfolio_router
+from .domains.portfolio_manager.api.transaction_endpoints import router as transaction_router
+from .domains.portfolio_manager.api.position_endpoints import router as position_router
 
 app = FastAPI(
     title="AI Capital API",
@@ -40,6 +44,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "Summarization", "description": "Endpoints for summarizing SEC filings."},
         {"name": "Price Prediction", "description": "Endpoints for predicting stock prices."},
+        {"name": "Portfolio Management", "description": "Endpoints for managing portfolios and trades."},
     ],
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
@@ -53,6 +58,10 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(public_price_prediction_router, prefix="/predict", tags=["Price Prediction"])
 api_router.include_router(summarization_router, prefix="/summarizer", tags=["Summarization"])
 api_router.include_router(query_router, prefix="/summarizer", tags=["Summarization"])
+api_router.include_router(user_router, prefix="/portfolio/auth", tags=["Portfolio Management"])
+api_router.include_router(portfolio_router, prefix="/portfolio/portfolios", tags=["Portfolio Management"])
+api_router.include_router(transaction_router, prefix="/portfolio/transactions", tags=["Portfolio Management"])
+api_router.include_router(position_router, prefix="/portfolio/positions", tags=["Portfolio Management"])
 
 
 app.include_router(api_router)
@@ -67,6 +76,7 @@ async def root():
             "summarization": "GET /api/v1/summarizer/summary/{ticker} - SEC filing summarization",
             "query": "GET /api/v1/summarizer/query/{ticker}?q=... - Q&A on filings",
             "price_prediction": "GET /api/v1/predict/price/{ticker} - Stock price prediction",
+            "portfolio": "POST /api/v1/portfolio/auth/register - User registration",
         }
     }
 

@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 pydantic-settings
-# sqlalchemy[asyncio]
+sqlalchemy[asyncio]
 aiohttp
 pandas==2.2.0
 numpy
@@ -30,8 +30,10 @@ botocore>=1.29.0
 pytest
 
 # Database Drivers
-# psycopg2-binary
-# asyncpg
+asyncpg
+alembic
+bcrypt
+python-jose[cryptography]
 
 # ARIMA Modeling
 statsmodels>=0.14.0

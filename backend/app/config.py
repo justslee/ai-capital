@@ -7,11 +7,15 @@ class Settings(BaseSettings):
     fmp_api_key: Optional[str] = None
     redis_host: str = "localhost" 
     redis_port: int = 6379     
-    cache_ttl_seconds: int = 3600 # Default cache TTL: 1 hour
+    cache_ttl_seconds: int = 3600
  
     pinecone_api_key: Optional[str] = None
     pinecone_environment: Optional[str] = None
     openai_api_key: str
+    
+    # Database Configuration
+    database_url: Optional[str] = None
+    db_echo: bool = False
     
     # AWS Credentials
     aws_access_key_id: Optional[str] = None
