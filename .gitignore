@@ -141,3 +141,11 @@ cython_debug/
 claude.md
 /exports/ tasks/todo.md
 .DS_Store
+
+# Gradle (project-specific)
+hft-engine/.gradle/
+hft-engine/build/
+
+# Optional: ignore all module build/gradle caches
+**/.gradle/
+**/build/
