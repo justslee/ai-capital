@@ -1,0 +1,11 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: hft-engine
+
+logging:
+  level:
+    com.aicapital.hft: INFO
+    root: WARN

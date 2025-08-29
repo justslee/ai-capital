@@ -1,0 +1,76 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.5'
+}
+
+group = 'com.aicapital'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    
+    // LMAX Disruptor
+    implementation 'com.lmax:disruptor:3.4.4'
+    
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+    testCompileOnly 'org.projectlombok:lombok:1.18.30'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
+    
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// JNI native library configuration
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/main/java']
+        }
+        resources {
+            srcDirs = ['src/main/resources']
+        }
+    }
+}
+
+// Task to generate JNI headers
+def jniSources = fileTree(dir: 'src/main/java', include: '**/*JNI.java')
+
+task generateJniHeaders(type: Exec, dependsOn: classes) {
+    onlyIf { !jniSources.isEmpty() }
+    doFirst {
+        mkdir 'src/main/native'
+    }
+    commandLine([ 'javac', '-h', 'src/main/native', '-cp', sourceSets.main.runtimeClasspath.asPath ] + jniSources.files.collect { it.path })
+}
+
+// Task to build native libraries (placeholder)
+task buildNativeLibs(type: Exec, dependsOn: generateJniHeaders) {
+    onlyIf { !jniSources.isEmpty() }
+    workingDir '../hft-core'
+    commandLine 'echo', 'Native library build placeholder'
+}
+
+jar {
+    if (!jniSources.isEmpty()) {
+        dependsOn buildNativeLibs
+    }
+}
