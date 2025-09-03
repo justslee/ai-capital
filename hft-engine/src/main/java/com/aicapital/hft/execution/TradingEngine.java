@@ -1,4 +1,4 @@
-package com.aicapital.hft.core;
+package com.aicapital.hft.execution;
 
 public class TradingEngine {
     // Main trading orchestration

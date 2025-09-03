@@ -1,24 +1,33 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
+#include "hft/core/order.hpp"
+#include <map>
+#include <deque>
+
 
 namespace hft::core {
 
 class OrderBook {
 public:
-    OrderBook() = default;
-    ~OrderBook() = default;
+    void addBid(const Order& bid);
+    void addAsk(const Order& ask);
 
-    OrderBook(const OrderBook&) = delete;
-    OrderBook& operator=(const OrderBook&) = delete;
-    OrderBook(OrderBook&&) = delete;
-    OrderBook& operator=(OrderBook&&) = delete;
+    long bestBid() const;
+    long bestAsk() const;
 
-    void clear();
+    const Order* peekBestBid() const;
+    const Order* peekBestAsk() const;
+
+    void popBestBid();
+    void popBestAsk();
+
+    void reset();
+
+private:
+    std::map<long, std::deque<Order>> asks;
+    std::map<long, std::deque<Order>> bids;
 };
-
-} // namespace hft::core
+} 
 
 
 
