@@ -3,6 +3,7 @@
 #include "hft/core/order.hpp"
 #include <map>
 #include <deque>
+#include <cstddef>
 
 
 namespace hft::core {
@@ -18,6 +19,10 @@ public:
     const Order* peekBestBid() const;
     const Order* peekBestAsk() const;
 
+    // Mutable views for matching hot path
+    Order* peekBestBidMutable();
+    Order* peekBestAskMutable();
+
     void popBestBid();
     void popBestAsk();
 
@@ -28,7 +33,6 @@ private:
     std::map<long, std::deque<Order>> bids;
 };
 } 
-
 
 
 

@@ -19,14 +19,11 @@ public:
     // Route helper (scaffold): choose shard index for the order
     // and return that index. Callers enqueue to writers[shard].
     template <typename Writer>
-    std::size_t route(const Order& order, const std::vector<Writer>& /*writers*/) const {
-        return shardOf(order);
-    }
+    std::size_t route(const Order& order, const std::vector<Writer>& /*writers*/) const { return shardOf(order); }
 
 private:
     std::size_t numShards_{};
 };
 
 } // namespace hft::core
-
 

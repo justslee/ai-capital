@@ -42,6 +42,22 @@ const Order* OrderBook::peekBestAsk() const {
     return &dq.front();
 }
 
+Order* OrderBook::peekBestBidMutable() {
+    if (bids.empty()) return nullptr;
+    auto it = std::prev(bids.end());
+    auto& dq = it->second;
+    if (dq.empty()) return nullptr;
+    return &dq.front();
+}
+
+Order* OrderBook::peekBestAskMutable() {
+    if (asks.empty()) return nullptr;
+    auto it = asks.begin();
+    auto& dq = it->second;
+    if (dq.empty()) return nullptr;
+    return &dq.front();
+}
+
 void OrderBook::popBestBid() {
     if (bids.empty()) return;
     auto it = std::prev(bids.end());
@@ -58,7 +74,6 @@ void OrderBook::popBestAsk() {
     if (q.empty()) asks.erase(it);
 }
 } // namespace hft::core
-
 
 
 

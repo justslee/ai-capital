@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <memory>
 #include "hft/core/order.hpp"
+#include "hft/core/ring_buffer.hpp"
+#include "hft/core/trade.hpp"
 
 namespace hft::core {
 
@@ -20,6 +22,16 @@ public:
     bool submit(const Order& order);
     bool submit(Order&& order);
 
+    // Low-latency path: obtain the per-shard SPSC writer. Callers must ensure
+    // exactly one producer thread uses each shard's writer.
+    typename RingBuffer<Order>::Writer& writerForShard(std::size_t shardIdx);
+    typename RingBuffer<Trade>::Reader& tradeReaderForShard(std::size_t shardIdx);
+
+    // Direct enqueue to a specific shard and update engine counters.
+    // Caller must preserve SPSC by ensuring a single producer per shard.
+    bool enqueueToShard(std::size_t shardIdx, const Order& order);
+    bool enqueueToShard(std::size_t shardIdx, Order&& order);
+
     // Lifecycle
     void start();
     void shutdown();
@@ -29,6 +41,7 @@ public:
     std::size_t enqueuedCount() const noexcept;
     std::size_t droppedCount() const noexcept;
     std::size_t processedCount() const noexcept;
+    std::size_t tradesCount() const noexcept;
 
 private:
     struct Impl;
@@ -36,7 +49,3 @@ private:
 };
 
 } // namespace hft::core
-
-
-
-

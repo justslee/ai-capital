@@ -13,6 +13,10 @@ endif()
 
 add_library(hftcore
     src/order_book.cpp
+    src/order_router.cpp
+    src/shard.cpp
+    src/affinity.cpp
+    src/ingress_coordinator.cpp
     src/matching_engine.cpp
     src/replay/replay_driver.cpp
 )
@@ -27,6 +31,7 @@ target_compile_definitions(hftcore PRIVATE HFTCORE_VERSION=\"${PROJECT_VERSION}\
 
 if(HFTCORE_BUILD_APPS)
     add_subdirectory(apps/replay_sim)
+    add_subdirectory(apps/random_sim)
 endif()
 
 install(TARGETS hftcore EXPORT hftcoreTargets
@@ -36,7 +41,4 @@ install(TARGETS hftcore EXPORT hftcoreTargets
 )
 install(DIRECTORY include/ DESTINATION include)
 export(EXPORT hftcoreTargets FILE ${CMAKE_CURRENT_BINARY_DIR}/hftcoreTargets.cmake)
-
-
-
 
