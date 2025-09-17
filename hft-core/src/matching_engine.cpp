@@ -11,6 +11,38 @@
 
 namespace hft::core {
 
+namespace {
+template <typename ImplT, typename OrderLike>
+inline bool tryEnqueueToShard(ImplT& impl, std::size_t shardIdx, OrderLike&& order) {
+    auto& writer = impl.shards.at(shardIdx)->writer();
+    if (writer.tryEnqueue(std::forward<OrderLike>(order))) {
+        impl.enq.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    impl.drop.fetch_add(1, std::memory_order_relaxed);
+    return false;
+}
+
+template <typename ImplT>
+inline void startShards(ImplT& impl) { for (auto& shard : impl.shards) shard->start(); }
+
+template <typename ImplT>
+inline void resetMetrics(ImplT& impl) {
+    impl.enq.store(0, std::memory_order_relaxed);
+    impl.drop.store(0, std::memory_order_relaxed);
+    impl.proc.store(0, std::memory_order_relaxed);
+    impl.trades.store(0, std::memory_order_relaxed);
+}
+
+template <typename ImplT>
+inline void warmup(ImplT& impl) { for (auto& shard : impl.shards) (void)shard->ring().capacity(); }
+
+template <typename ImplT>
+inline void waitUntilShardsRunning(ImplT& impl) {
+    for (auto& shard : impl.shards) { while (!shard->isRunning()) std::this_thread::yield(); }
+}
+} // anonymous
+
 struct MatchingEngine::Impl {
     std::size_t numShards{};
     std::size_t ringCapacity{};
@@ -55,15 +87,7 @@ bool MatchingEngine::submit(const Order& order) {
     }
 
     const std::size_t shardIdx = impl_->router.shardOf(order);
-    auto& writer = impl_->shards[shardIdx]->writer();
-
-    if (writer.tryEnqueue(order)) {
-        impl_->enq.fetch_add(1, std::memory_order_relaxed);
-        return true;
-    } else {
-        impl_->drop.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+    return tryEnqueueToShard(*impl_, shardIdx, order);
 }
 
 bool MatchingEngine::submit(Order&& order) {
@@ -76,15 +100,7 @@ bool MatchingEngine::submit(Order&& order) {
     }
 
     const std::size_t shardIdx = impl_->router.shardOf(order);
-    auto& writer = impl_->shards[shardIdx]->writer();
-
-    if (writer.tryEnqueue(std::move(order))) {
-        impl_->enq.fetch_add(1, std::memory_order_relaxed);
-        return true;
-    } else {
-        impl_->drop.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+    return tryEnqueueToShard(*impl_, shardIdx, std::move(order));
 }
 
 void MatchingEngine::start() {
@@ -94,28 +110,10 @@ void MatchingEngine::start() {
         return;
     }
 
-    // start the shards
-    for (auto& shard : impl_->shards) {
-        shard->start();
-    }
-
-    // reset metrics
-    impl_->enq.store(0, std::memory_order_relaxed);
-    impl_->drop.store(0, std::memory_order_relaxed);
-    impl_->proc.store(0, std::memory_order_relaxed);
-    impl_->trades.store(0, std::memory_order_relaxed);
-
-    // light warmup 
-    for (auto& shard : impl_->shards) {
-        (void)shard->ring().capacity();
-    }
-
-    // wait until shards report running
-    for (auto& shard : impl_->shards) {
-        while (!shard->isRunning()) {
-            std::this_thread::yield();
-        }
-    }
+    startShards(*impl_);
+    resetMetrics(*impl_);
+    warmup(*impl_);
+    waitUntilShardsRunning(*impl_);
 }
 
 void MatchingEngine::shutdown() {
@@ -145,21 +143,17 @@ typename RingBuffer<Order>::Writer& MatchingEngine::writerForShard(std::size_t s
 typename RingBuffer<Trade>::Reader& MatchingEngine::tradeReaderForShard(std::size_t shardIdx) {
     return impl_->shards.at(shardIdx)->tradeReader();
 }
-// Optional accessor for trades (not exposed in header yet)
+
+typename RingBuffer<Event>::Reader& MatchingEngine::eventReaderForShard(std::size_t shardIdx) {
+    return impl_->shards.at(shardIdx)->eventReader();
+}
 
 bool MatchingEngine::enqueueToShard(std::size_t shardIdx, const Order& order) {
     if (!impl_ || !impl_->running.load(std::memory_order_acquire)) {
         impl_->drop.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    auto& writer = impl_->shards.at(shardIdx)->writer();
-    if (writer.tryEnqueue(order)) {
-        impl_->enq.fetch_add(1, std::memory_order_relaxed);
-        return true;
-    } else {
-        impl_->drop.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+    return tryEnqueueToShard(*impl_, shardIdx, order);
 }
 
 bool MatchingEngine::enqueueToShard(std::size_t shardIdx, Order&& order) {
@@ -167,14 +161,7 @@ bool MatchingEngine::enqueueToShard(std::size_t shardIdx, Order&& order) {
         impl_->drop.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    auto& writer = impl_->shards.at(shardIdx)->writer();
-    if (writer.tryEnqueue(std::move(order))) {
-        impl_->enq.fetch_add(1, std::memory_order_relaxed);
-        return true;
-    } else {
-        impl_->drop.fetch_add(1, std::memory_order_relaxed);
-        return false;
-    }
+    return tryEnqueueToShard(*impl_, shardIdx, std::move(order));
 }
 
 } // namespace hft::core

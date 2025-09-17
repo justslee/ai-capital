@@ -9,6 +9,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <deque>
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #endif
@@ -40,38 +41,85 @@ int main(int argc, char** argv) {
         hft::core::IngressCoordinator ingress(engine, numProducers, mailboxSize);
         ingress.start();
 
-        // Start one trade consumer per shard to drain trades
+        // Start consumers
         std::vector<std::thread> tradeConsumers;
         std::atomic<bool> running{true};
         tradeConsumers.reserve(numShards);
-        for (std::size_t s = 0; s < numShards; ++s) {
+        std::vector<std::thread> eventConsumers;
+        eventConsumers.reserve(numShards);
+        std::atomic<std::uint64_t> execEvents{0}, rejectEvents{0};
+
+        auto startTradeConsumer = [&](std::size_t s){
             tradeConsumers.emplace_back([&engine, s, &running]{
                 auto& r = engine.tradeReaderForShard(s);
                 hft::core::Trade tr;
                 while (running.load(std::memory_order_acquire)) {
                     if (!r.tryDequeue(tr)) {
-                        // short pause
                         #if defined(__x86_64__) || defined(_M_X64)
                             _mm_pause();
                         #endif
                     }
                 }
-                // Drain residual
                 while (r.tryDequeue(tr)) {}
             });
-        }
+        };
+        auto startEventConsumer = [&](std::size_t s){
+            eventConsumers.emplace_back([&engine, s, &running, &execEvents, &rejectEvents]{
+                auto& er = engine.eventReaderForShard(s);
+                hft::core::Event ev;
+                while (running.load(std::memory_order_acquire)) {
+                    if (er.tryDequeue(ev)) {
+                        if (ev.type == hft::core::Event::Type::Exec) execEvents.fetch_add(1, std::memory_order_relaxed);
+                        else if (ev.type == hft::core::Event::Type::Reject) rejectEvents.fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        #if defined(__x86_64__) || defined(_M_X64)
+                            _mm_pause();
+                        #endif
+                    }
+                }
+                while (er.tryDequeue(ev)) {
+                    if (ev.type == hft::core::Event::Type::Exec) execEvents.fetch_add(1, std::memory_order_relaxed);
+                    else if (ev.type == hft::core::Event::Type::Reject) rejectEvents.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+        };
+        for (std::size_t s = 0; s < numShards; ++s) { startTradeConsumer(s); startEventConsumer(s); }
 
         // Prepare random generators
         std::mt19937_64 rng(seed);
         std::uniform_int_distribution<std::uint32_t> symDist(0, static_cast<std::uint32_t>(numSymbols - 1));
         std::uniform_int_distribution<int> sideDist(0, 1);
         std::uniform_int_distribution<int> qtyDist(1, 100);
-        // For price, give each symbol a base and add jitter
         std::vector<std::int64_t> baseCents(numSymbols);
         for (std::size_t i = 0; i < numSymbols; ++i) {
-            baseCents[i] = 5'000 + static_cast<std::int64_t>((i % 100) * 10); // $50.00 + offset
+            baseCents[i] = 5'000 + static_cast<std::int64_t>((i % 100) * 10);
         }
-        std::uniform_int_distribution<int> priceJitter(-50, 50); // +/- $0.50
+        std::uniform_int_distribution<int> priceJitter(-50, 50);
+
+        // Live order pools for cancel/replace targeting (bounded)
+        std::vector<std::deque<std::uint64_t>> liveBuys(numSymbols);
+        std::vector<std::deque<std::uint64_t>> liveSells(numSymbols);
+        const std::size_t maxLivePerSymbol = 4096;
+        auto pushLive = [&](std::uint32_t sym, bool isBuy, std::uint64_t id){
+            auto& dq = isBuy ? liveBuys[sym] : liveSells[sym];
+            dq.push_back(id);
+            if (dq.size() > maxLivePerSymbol) dq.pop_front();
+        };
+        auto popTarget = [&](std::uint32_t sym, bool isBuy, std::uint64_t& outId){
+            auto& dq = isBuy ? liveBuys[sym] : liveSells[sym];
+            if (dq.empty()) return false;
+            outId = dq.back();
+            dq.pop_back();
+            return true;
+        };
+
+        // Operation mix
+        std::uniform_int_distribution<int> opDist(0, 99);
+        const int cancelPct = 7;
+        const int replacePct = 7;
+
+        // Counters
+        std::uint64_t genNew = 0, genCancel = 0, genReplace = 0;
 
         // Decode/dispatch loop (single thread here in main)
         const auto startTs = steady_clock::now();
@@ -82,21 +130,61 @@ int main(int argc, char** argv) {
         while (steady_clock::now() < endTs) {
             const auto loopStart = steady_clock::now();
 
-            // Generate one order
-            hft::core::Order ord{};
-            ord.id = orderSeq++;
-            ord.type = hft::core::Order::Type::LIMIT;
-            ord.side = (sideDist(rng) == 0) ? hft::core::Order::Side::BUY : hft::core::Order::Side::SELL;
-            ord.symbolId = symDist(rng);
-            ord.qty = qtyDist(rng);
-            const auto base = baseCents[ord.symbolId];
-            const auto jitter = static_cast<std::int64_t>(priceJitter(rng));
-            ord.priceCents = base + jitter;
+            // Maybe emit Cancel/Replace, else New
+            const int opRoll = opDist(rng);
+            const std::uint32_t sym = symDist(rng);
+            const bool isBuySide = (sideDist(rng) == 0);
+            bool emitted = false;
 
-            ingress.submitFromDecoder(ord);
+            if (opRoll < cancelPct) {
+                std::uint64_t target{};
+                if (popTarget(sym, isBuySide, target)) {
+                    hft::core::Order cxl{};
+                    cxl.op = hft::core::Order::Op::Cancel;
+                    cxl.symbolId = sym;
+                    cxl.targetId = target;
+                    ingress.submitFromDecoder(cxl);
+                    ++genCancel;
+                    emitted = true;
+                }
+            } else if (opRoll < cancelPct + replacePct) {
+                std::uint64_t target{};
+                if (popTarget(sym, isBuySide, target)) {
+                    hft::core::Order repl{};
+                    repl.op = hft::core::Order::Op::Replace;
+                    repl.id = orderSeq++;
+                    repl.symbolId = sym;
+                    repl.type = hft::core::Order::Type::LIMIT;
+                    repl.side = isBuySide ? hft::core::Order::Side::BUY : hft::core::Order::Side::SELL;
+                    repl.targetId = target;
+                    const auto base = baseCents[sym];
+                    const auto jitter = static_cast<std::int64_t>(priceJitter(rng));
+                    repl.newPriceCents = base + jitter;
+                    repl.newQty = qtyDist(rng);
+                    ingress.submitFromDecoder(repl);
+                    pushLive(sym, isBuySide, repl.id);
+                    ++genReplace;
+                    emitted = true;
+                }
+            }
+
+            if (!emitted) {
+                hft::core::Order ord{};
+                ord.op = hft::core::Order::Op::New;
+                ord.id = orderSeq++;
+                ord.type = hft::core::Order::Type::LIMIT;
+                ord.side = isBuySide ? hft::core::Order::Side::BUY : hft::core::Order::Side::SELL;
+                ord.symbolId = sym;
+                ord.qty = qtyDist(rng);
+                const auto base = baseCents[sym];
+                const auto jitter = static_cast<std::int64_t>(priceJitter(rng));
+                ord.priceCents = base + jitter;
+                ingress.submitFromDecoder(ord);
+                pushLive(sym, isBuySide, ord.id);
+                ++genNew;
+            }
 
             if (nanosPerOrder) {
-                // Pace to target rate
                 const auto after = steady_clock::now();
                 const auto elapsed = duration_cast<nanoseconds>(after - loopStart).count();
                 if (elapsed < static_cast<long long>(nanosPerOrder)) {
@@ -108,7 +196,6 @@ int main(int argc, char** argv) {
         const auto genEndTs = steady_clock::now();
         const std::uint64_t generated = orderSeq - 1;
 
-        // Wait until all generated orders are processed by the engine
         while (engine.processedCount() < generated) {
             #if defined(__x86_64__) || defined(_M_X64)
                 _mm_pause();
@@ -116,10 +203,10 @@ int main(int argc, char** argv) {
         }
         const auto processedEndTs = steady_clock::now();
 
-        // Stop producers and workers
         ingress.stop();
         running.store(false, std::memory_order_release);
         for (auto& t : tradeConsumers) if (t.joinable()) t.join();
+        for (auto& t : eventConsumers) if (t.joinable()) t.join();
         engine.shutdown();
 
         const auto genDur = duration_cast<milliseconds>(genEndTs - startTs).count();
@@ -131,6 +218,11 @@ int main(int argc, char** argv) {
         std::cout << "Dropped:   " << engine.droppedCount() << "\n";
         std::cout << "Processed: " << engine.processedCount() << "\n";
         std::cout << "Trades:    " << engine.tradesCount() << "\n";
+        std::cout << "Exec ev:   " << execEvents.load() << "\n";
+        std::cout << "Reject ev: " << rejectEvents.load() << "\n";
+        std::cout << "New gen:   " << genNew << "\n";
+        std::cout << "Cancel gen:" << genCancel << "\n";
+        std::cout << "Repl gen:  " << genReplace << "\n";
         std::cout << "Gen ms:    " << genDur << "\n";
         std::cout << "Drain ms:  " << drainDur << "\n";
         std::cout << "Total ms:  " << totalDur << "\n";

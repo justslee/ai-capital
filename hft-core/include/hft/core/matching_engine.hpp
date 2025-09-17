@@ -5,6 +5,7 @@
 #include "hft/core/order.hpp"
 #include "hft/core/ring_buffer.hpp"
 #include "hft/core/trade.hpp"
+#include "hft/core/events.hpp"
 
 namespace hft::core {
 
@@ -26,6 +27,7 @@ public:
     // exactly one producer thread uses each shard's writer.
     typename RingBuffer<Order>::Writer& writerForShard(std::size_t shardIdx);
     typename RingBuffer<Trade>::Reader& tradeReaderForShard(std::size_t shardIdx);
+    typename RingBuffer<Event>::Reader& eventReaderForShard(std::size_t shardIdx);
 
     // Direct enqueue to a specific shard and update engine counters.
     // Caller must preserve SPSC by ensuring a single producer per shard.
