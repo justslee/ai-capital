@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(hft-core VERSION 0.1.0 LANGUAGES CXX)
 
 option(HFTCORE_BUILD_APPS "Build example applications" ON)
@@ -18,7 +18,10 @@ add_library(hftcore
     src/affinity.cpp
     src/ingress_coordinator.cpp
     src/matching_engine.cpp
+    src/replay/dbn_reader.cpp
+    src/replay/dbn_local_source.cpp
     src/replay/replay_driver.cpp
+    src/backtester.cpp
 )
 
 target_include_directories(hftcore
@@ -27,18 +30,24 @@ target_include_directories(hftcore
         $<INSTALL_INTERFACE:include>
 )
 
-target_compile_definitions(hftcore PRIVATE HFTCORE_VERSION=\"${PROJECT_VERSION}\")
+target_compile_definitions(hftcore PRIVATE HFTCORE_VERSION="${PROJECT_VERSION}")
+
+# Databento C++ client (for DBN decoding)
+include(FetchContent)
+find_package(OpenSSL REQUIRED)
+
+FetchContent_Declare(
+    databento
+    GIT_REPOSITORY https://github.com/databento/databento-cpp
+    GIT_TAG HEAD
+)
+FetchContent_MakeAvailable(databento)
+
+target_link_libraries(hftcore PRIVATE databento::databento)
 
 if(HFTCORE_BUILD_APPS)
     add_subdirectory(apps/replay_sim)
     add_subdirectory(apps/random_sim)
+    add_subdirectory(apps/backtest_sim)
 endif()
-
-install(TARGETS hftcore EXPORT hftcoreTargets
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
-)
-install(DIRECTORY include/ DESTINATION include)
-export(EXPORT hftcoreTargets FILE ${CMAKE_CURRENT_BINARY_DIR}/hftcoreTargets.cmake)
 

@@ -99,7 +99,7 @@ private:
     // Market order protections (simple caps)
     int marketMaxLevels_{128};            // max price levels to sweep
     int marketMaxQty_{1'000'000};         // max total quantity per market order
-    std::int64_t marketMaxNotional_{50'000'000}; // e.g. $500k in cents
+    std::int64_t marketMaxNotional_{9'000'000'000'000'000}; // very large cap (in cents)
 };
 
 } // namespace hft::core

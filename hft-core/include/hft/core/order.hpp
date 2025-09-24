@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 #include <cstdint>
 
 namespace hft::core {
@@ -24,5 +23,7 @@ struct Order {
     std::uint64_t targetId{};     // id of order to cancel/replace (old id)
     std::int64_t newPriceCents{}; // for Replace
     int newQty{};                 // for Replace (0 = keep old)
+    // Optional: marker for execution events when replaying (used to build trades count)
+    bool isExecution{false};
 };
 } 

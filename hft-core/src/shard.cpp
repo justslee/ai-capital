@@ -53,6 +53,12 @@ void Shard::runLoop() {
                 if (processedCounter_) processedCounter_->fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
+            // Feed-provided execution: count as trade and skip book mutation
+            if (ev.isExecution) {
+                if (tradesCounter_) tradesCounter_->fetch_add(1, std::memory_order_relaxed);
+                if (processedCounter_) processedCounter_->fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
             // Operation dispatch
             if (ev.op == Order::Op::Cancel) {
                 handleCancel(ev, book);

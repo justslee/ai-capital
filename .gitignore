@@ -149,3 +149,9 @@ hft-engine/build/
 # Optional: ignore all module build/gradle caches
 **/.gradle/
 **/build/
+
+# Ignore local DBN datasets
+XNAS-*/
+
+# macOS
+.DS_Store

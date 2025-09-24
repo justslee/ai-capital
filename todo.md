@@ -4,34 +4,6 @@ This document explains, in plain language, the next tasks to bring the C++ match
 
 ## Matching engine (engine correctness and microstructure semantics)
 
-1) [x] Add OrderBook locator index for O(1) cancel/replace
-- What: Maintain `id → Locator` mapping so we can instantly find a resting order by `orderId`. `Locator` holds `{side, price, deque_ptr, index}`.
-- Why: ITCH has cancels/replaces by order id. Scanning queues is O(n) and breaks latency/determinism.
-- How: Update the map on every add/pop/erase; when FIFO head changes, adjust indices for the affected deque. Provide `removeById(id)` and `replaceById(id, newOrder)` helpers.
-- Acceptance: Cancel/replace works even when the order is not at the top of its price level; complexity ~O(1).
-
-2) [x] Wire cancel/replace via locator in Shard handlers; tests
-- What: Use the locator API inside `Shard::handleCancel/handleReplace` instead of head‑only logic.
-- Why: Ensures realistic ITCH semantics where cancels hit any resting order.
-- How: Look up `targetId`, remove or modify in place, and update locator; emit proper ACKs (see item 7).
-- Acceptance: Unit tests: cancel/replace at head and mid‑queue; state remains consistent.
-
-3) [x] Implement TIF (time‑in‑force): IOC, FOK, Post‑Only
-- IOC (Immediate‑Or‑Cancel): Match as much as possible immediately; do not rest remainder.
-- FOK (Fill‑Or‑Kill): Only execute if full quantity can be immediately filled; otherwise do nothing.
-- Post‑Only: If any immediate trade would occur, reject or convert to a passive order per policy; do not take liquidity.
-- Why: These are standard exchange semantics; replay and strategies depend on them.
-- How: Add a pre‑check for FOK (sum opposite book volume up to limit price); for IOC skip rest; for Post‑Only, check best opposite price before matching.
-- Acceptance: Scenario tests for all three across both sides with partial/insufficient liquidity.
-
-4) [x] Market orders with sweep caps and guard rails
-- Market order: Executes against the best available prices until filled.
-- Sweep caps: Limits on how far a market order can sweep (e.g., max ticks away or max notional/qty) to avoid pathological prints in thin markets.
-- Guard rails: Additional safety (price bands, LULD‑like checks) preventing trades far from reference.
-- Why: Prevents runaway sweeps during replay or live connects; mirrors venue risk controls.
-- How: Treat market as buy with `+INF`/sell with `-INF`, but stop when caps are hit; log/return rejection.
-- Acceptance: Market orders stop at configured caps; no trades beyond bands.
-
 5) [ ] Validations and risk checks
 - Tick/lot validation: Round/deny if price not a multiple of tick or size not multiple of lot.
 - Price bands: Reject orders outside dynamic/static bands.
@@ -45,12 +17,6 @@ This document explains, in plain language, the next tasks to bring the C++ match
 - Why: Common venue/firm policy; reduces artificial prints and fees.
 - How: Track participant on orders; at match time, enforce policy before printing trade.
 - Acceptance: STP fires deterministically with configured policy; no self‑trades appear.
-
-7) [x] Event schema and reporting: ACK/EXEC
-- ACK: Order accepted; REJECT: validation failure; CANCEL/REPLACE acks; EXEC: execution/trade report (incl. partials).
-- Why: Downstream systems and replay verification need structured, deterministic events.
-- How: Define compact structs and a per‑shard sink (ring/callback). Include `seq`, `ts_event`, `ts_process`, `orderId`, `fillQty`, `price`, `liquidityFlag` (maker/taker), etc.
-- Acceptance: For each input op, exactly one deterministic outcome event sequence is emitted.
 
 8) [ ] Session state and halts
 - What: Track per‑symbol trading status (open/close/halt). Gate accepting or matching according to state.
@@ -78,7 +44,35 @@ Tasks:
 
 ## Replay driver (DataBento DBN / NASDAQ ITCH)
 
-1) [ ] DBN frame reader and ordering guarantees
+Scope and architecture notes:
+- Start with local DataBento DBN/DBZ files (MBO dataset). No API connectivity required initially.
+- Design a generic feed handler so the same codepath can ingest historical files and, later, live APIs.
+- Abstractions:
+  - FeedSource (interface): next(frame) → bool, returns decoded feed frames in time/seq order.
+  - Decoder/Mapper: converts feed frames (e.g., DBN MBO) → engine `Order` ops + session status.
+  - Pacer: converts feed `ts_event` to wall time with speed scaling.
+
+DBN.zst (compressed DBN) specific plan:
+- [ ] Load `symbology.json` and build instrument_id → symbol map (fallback to symbol field if present)
+  - Acceptance: For NVDA/MSFT, ids resolve to expected symbols.
+- [ ] Load `metadata.json` and use price/size scales
+  - What: Convert integer price to cents using dataset scales; confirm `ts_event` unit is ns.
+  - Acceptance: MSFT 2022-06-10 prices around $260–$270 convert correctly.
+- [ ] Map MBO actions → engine ops
+  - A/Add → New LIMIT (id, side, price, size)
+  - C/Cancel or D/Delete → Cancel(targetId)
+  - R/Replace → Replace(targetId, newPrice/newQty) (handle new/old ids if present)
+  - E/Execute or T/Trade → Decrement resting order by qty at price (no new order)
+  - Acceptance: A tiny window reproduces expected book depth changes at top levels.
+- [ ] Add `ExternalExec` replay path (without synthesizing aggressor orders)
+  - What: Introduce a replay op that tells the shard to decrement a resting order by id/qty/price and emit Exec.
+  - Why: Avoids double-printing and preserves feed determinism.
+  - Acceptance: Exec events count matches feed executes for the window.
+
+- Utilities / prerequisites
+  - [ ] LiveFeed stub (no-op placeholder) to validate pluggability for live APIs later.
+
+1) [ ] DBN frame reader and ordering guarantees (local files)
 - What: Stream DBN frames in sequence/time order, enforce non‑decreasing `seq` and `ts_event`.
 - Why: Determinism; exchange feeds are ordered—our ingest must be too.
 - How: Use DataBento reader, assert monotonicity, drop duplicates; maintain per‑symbol stats.
@@ -93,16 +87,15 @@ Tasks:
 - Trading Status/Halt: update session state and gate orders.
 - Acceptance: A small ITCH clip reproduces the official top‑of‑book and prints.
 
-3) [ ] Integration with IngressCoordinator
-- What: Route by `symbolId`, keep SPSC discipline per shard.
-- Why: Preserves determinism and avoids locks.
-- How: Decoder thread pushes to producer mailboxes → producers enqueue to shard writers.
-- Acceptance: No drops at steady state; backpressure only when configured to stress.
+3) [ ] Replay safety and protections
+ - Guard against malformed data: invalid prices/sizes, unknown symbols, status mismatches.
+ - Optional: cap max symbols, rate, duration to keep runs affordable.
+ - Acceptance: Replay exits cleanly with a summary; bad records counted and skipped.
 
-4) [ ] Replay safety and protections
-- Guard against malformed data: invalid prices/sizes, unknown symbols, status mismatches.
-- Optional: cap max symbols, rate, duration to keep runs affordable.
-- Acceptance: Replay exits cleanly with a summary; bad records counted and skipped.
+4) [ ] Tests and verification
+ - Unit: cancel/replace not‑at‑head, TIF semantics, market caps, STP, events.
+ - Replay: golden fixtures compare book/trade outputs to expected snapshots.
+ - Performance: throughput+latency smoke tests on Linux using isolated cores.
 
 5) [ ] Tests and verification
 - Unit: cancel/replace not‑at‑head, TIF semantics, market caps, STP, events.
@@ -117,8 +110,62 @@ Tasks:
 - Sequence monotonicity: Feed `seq`/`ts_event` must not go backwards; we enforce or drop.
 
 ## Suggested implementation order
-1) Locator index → Cancel/Replace wiring → TIF → Market+caps.
-2) Validations and STP → Event schema → Session/halts.
-3) DBN reader → ITCH mapping → Ingress integration → Tests and fixtures.
+1) Validations and STP → Session/halts.
+2) ITCH mapping (incl. ExternalExec) → Tests and fixtures.
+
+
+## Strategy module and simulated trading (incremental plan)
+
+### Phase 1 — Core interfaces and orchestration (C++)
+- Why: Establish clean seams so strategies can be hot-swapped and the engine remains agnostic.
+- What:
+  - Define Strategy interface: onMarketEvent(event), onFill(trade), onEnd(), initialize(context).
+  - Define OrderGateway API: submit(limit/market/cancel/replace), expose acknowledgments and fills.
+  - Create a Backtester orchestrator: subscribes to decoded feed events; paces by historical time; routes events to Strategy and orders to MatchingEngine.
+  - Event bus: typed channels for MarketEvent, OrderAck/Reject, Fills, and End-of-Run. Keep single-producer → multi-consumer semantics for determinism.
+
+### Phase 2 — Event mapping and accounting (C++)
+- Why: Strategies need consistent inputs; performance and testability depend on clean normalization.
+- What:
+  - Market event normalization: convert FeedEvent (from DBNLocalSource) and engine Event into Strategy-facing events (best bid/ask snapshots can be derived from current book).
+  - Position/P&L accounting: per-symbol position, average price, realized/unrealized P&L; handle partial fills, side-aware sign conventions.
+  - Risk hooks: max position, max notional; block strategy submits that exceed limits in backtests.
+
+### Phase 3 — Proof-of-concept rule-based strategy (C++)
+- Why: Validate the end-to-end loop quickly.
+- What:
+  - Implement a simple microstructure rule (examples):
+    - Momentum tick rule: if last N trades were up (or bid advancing), buy 100; if down, sell 100.
+    - Mean reversion: if spread widens > threshold and price deviates > k*std, fade back.
+  - Config: symbol allowlist, size, thresholds, cooldowns.
+  - Integrate with OrderGateway; observe fills; update position/P&L; end-of-run summary.
+
+### Phase 4 — Metrics, summaries, and runs
+- Why: Make results interpretable and comparable.
+- What:
+  - Counters: orders submitted/filled/rejected, fill ratio, average slippage, cancel ratio.
+  - P&L: realized, unrealized, peak-to-trough, Sharpe-like stats on intraday returns.
+  - Output: console summary and CSV/JSON dumps for offline analysis.
+
+### Phase 5 — Python bridge design for strategies
+- Why: Enable ML/analysis-heavy strategies in Python with a C++ match/market core.
+- What:
+  - Define a narrow pybind11 boundary:
+    - StrategyBase in C++ exposed to Python with virtuals onMarketEvent/onFill; Python can subclass.
+    - Numpy-friendly market event structs for efficient handoff; zero-copy views where possible.
+    - Batched callbacks: allow coalescing events to reduce Python call overhead.
+  - Safety/perf considerations: GIL handling, background threads, backpressure.
+
+### Phase 6 — Python strategy POC
+- Why: Prove the multi-language architecture.
+- What:
+  - Implement a minimal Python strategy: simple signal function over last K trades or mid-price deltas.
+  - Run the same backtest orchestration; verify fills/P&L match C++ reference for equivalent logic.
+
+### Nice-to-haves and future-proofing
+- Time controls: start/end, warm-up period, multiple days concatenation.
+- Determinism controls: seedable randomness for tie-breakers and market-order caps.
+- Data access helpers: rolling stats (VWAP, EMA, volatility) in C++ to reduce Python boundary crossings.
+- Multi-strategy portfolio runner: run many strategies over the same event stream (fan-out).
 
 
